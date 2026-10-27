@@ -55,20 +55,35 @@ A task often has two pull requests: a **git PR** on GitHub ([valamonai/pglpg](ht
 - **Check the status.** The `knowen.md/graph-pr` status on the git PR shows whether the graph PR is armed and up to date.
 - **Prerequisite:** the tree owner connects the pglpg.md tree to the GitHub repository (tree collaborators page → **GitHub** → **Connect a repository**). Until then, link the PRs by hand and a human merges both.
 
-## Git worktrees
+## Git Worktrees (`bin/wt`)
 
-When a task needs its own branch, use a git worktree under `.worktrees/` (gitignored) instead of switching branches in the main checkout:
+Use `bin/wt` to create and manage git worktrees under `.worktrees/` (gitignored), instead of switching branches in the main checkout.
 
-```bash
-git fetch origin
-git worktree add .worktrees/<name> -b <name> origin/master   # create a worktree and branch
-git worktree list                                           # list worktrees
-git worktree remove .worktrees/<name>                       # remove after the branch is merged
-```
+**When to use it**
 
-- `<name>` is both the directory and the branch name. Use dashes, and don't use `/` or `..` (for example `add-edge-uniqueness`).
-- Use a worktree when you run tasks or agents in parallel, or for risky work. Skip it for small edits on the branch you're already on.
-- Remove only worktrees you created, and check `git worktree list` first.
+- A task needs its own branch while the main checkout stays on `master`.
+- Several tasks or agents run in parallel, each in its own worktree.
+- Risky or long-running work that must not disturb the main checkout.
+
+Skip it for small edits on the branch you already have checked out.
+
+**How to use it**
+
+| Command | Purpose |
+| ------- | ------- |
+| `bin/wt <name> [base-ref]` | Create or switch to worktree `.worktrees/<name>` (default base: `origin/master`) |
+| `bin/wt list` | List worktrees with their branch and clean/dirty status |
+| `bin/wt rm <name> [--force]` | Remove a worktree (refuses if dirty; `--force` overrides; never removes the current one) |
+| `bin/wt help` | Full help, including the optional zsh wrapper for interactive `wt` use |
+
+- `<name>` becomes both the directory name and the branch name. It must not contain `/` or `..` and must not start with `-`; use dashes (for example `add-edge-uniqueness`). If the worktree or branch already exists, `wt` switches to it instead of creating a new one.
+- Creating a worktree also sets it up, and it is safe to run again. It only acts on what the main checkout has:
+  - symlinks `.env` and the shared `vendor/bundle`;
+  - copies `.bundle/config`;
+  - runs `bundle install` once a `Gemfile` exists (skip with `--no-bundle`).
+- **Test database:** if the specs use a PostgreSQL database, give each worktree its own database name (see [DEVELOPMENT.md](https://knowen.md/nodes/36331)), so parallel runs don't overwrite each other's data.
+- **Agents:** `bin/wt` prints `cd '<path>'` to stdout. If the caller's PATH lacks the rbenv or Homebrew directories that tools like `bundle` and `gh` need, it adds `&& export PATH="..."`. Eval the output to apply both, for example `eval "$(./bin/wt <name>)"`, or set the working directory to `.worktrees/<name>`.
+- After the branch is merged, clean up with `bin/wt rm <name>`. Remove only worktrees you created, and check `bin/wt list` first.
 
 ## Session completion
 

@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Make the script self-sufficient regardless of the caller's PATH: scripted or
+# agent shells often carry a minimal PATH (/usr/bin:...) with no version manager
+# and no Homebrew, which makes `bundle install` fall back to system Ruby and
+# fail with a bundler version mismatch. Prepend rbenv shims (they resolve the
+# Ruby pinned by .ruby-version) and Homebrew bins (node for ExecJS, etc.) only
+# when present and not already on PATH.
+# Track what we prepend so we can emit it for the caller's shell.
+PATH_PREPENDS=()
+prepend_path() {
+    local dir="$1"
+    [ -d "$dir" ] || return 0
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *)
+            PATH="$dir:$PATH"
+            PATH_PREPENDS+=("$dir")
+            ;;
+    esac
+}
+prepend_path "${HOME:-}/.rbenv/shims"
+prepend_path "${HOME:-}/.rbenv/bin"
+prepend_path /opt/homebrew/bin
+prepend_path /usr/local/bin
+export PATH
+
+# Emit the cd command to stdout. When PATH_PREPENDS is non-empty, include an
+# export PATH=... suffix so the caller's shell also gets the tool directories.
+emit_cd_command() {
+    local path="$1"
+    if [[ ${#PATH_PREPENDS[@]} -gt 0 ]]; then
+        # Build PATH prefix in reverse insertion order (last prepended first)
+        local prefix=""
+        local i
+        for ((i=${#PATH_PREPENDS[@]}-1; i>=0; i--)); do
+            if [[ -n "$prefix" ]]; then
+                prefix="$prefix:${PATH_PREPENDS[$i]}"
+            else
+                prefix="${PATH_PREPENDS[$i]}"
+            fi
+        done
+        echo "cd '$path' && export PATH=\"$prefix:\$PATH\""
+    else
+        echo "cd '$path'"
+    fi
+}
+
+# Resolve main repo root (correct from ANY directory: main checkout, any of its
+# subdirectories, any linked worktree, or any worktree subdirectory).
+# The first "worktree <path>" entry of `git worktree list --porcelain` is always
+# the main checkout and is an absolute path.
+get_main_repo_root() {
+    # `|| true` keeps a failed `git` (outside a repo) from tripping set -e/pipefail
+    # before require_repo can print a clean error.
+    { git worktree list --porcelain 2>/dev/null || true; } | awk '/^worktree /{print substr($0, 10); exit}'
+}
+
+# Lazy-initialized by require_repo so that `wt help` works outside a git repo.
+MAIN_REPO_ROOT=""
+WORKTREES_DIR=""
+
+require_repo() {
+    MAIN_REPO_ROOT="$(get_main_repo_root)"
+    if [ -z "$MAIN_REPO_ROOT" ]; then
+        log "Error: not inside a git repository"
+        exit 1
+    fi
+    WORKTREES_DIR="$MAIN_REPO_ROOT/.worktrees"
+}
+
+# Helper to log to stderr
+log() {
+    echo "$@" >&2
+}
+
+# Validate name: no slashes, no '..', no leading dash (options come after the name)
+validate_name() {
+    local name="$1"
+    if [[ "$name" == -* ]]; then
+        log "Error: name must not start with '-' (use: wt <name> [base-ref] [--no-bundle])"
+        exit 1
+    fi
+    if [[ "$name" == *"/"* ]] || [[ "$name" == ".." ]] || [[ "$name" == *"/.."* ]]; then
+        log "Error: name must not contain '/' or '..'"
+        exit 1
+    fi
+}
+
+# Find existing worktree for a branch (checked out in some .worktrees/*)
+find_worktree_by_branch() {
+    local branch="$1"
+    local wt
+    # List all worktrees and find ones in .worktrees/ that have this branch
+    while IFS= read -r line; do
+        if [[ "$line" == worktree\ * ]]; then
+            wt="${line#worktree }"
+        elif [[ "$line" == branch\ * ]]; then
+            local branch_ref="${line#branch }"
+            local branch_name="${branch_ref##refs/heads/}"
+            if [[ "$branch_name" == "$branch" ]]; then
+                # Check if this worktree is under .worktrees/
+                if [[ "$wt" == "$WORKTREES_DIR"/* ]]; then
+                    echo "$wt"
+                    return 0
+                fi
+            fi
+        fi
+    done < <(git -C "$MAIN_REPO_ROOT" worktree list --porcelain)
+    return 1
+}
+
+# Get branch checked out in a worktree directory
+get_worktree_branch() {
+    local wt="$1"
+    git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
+# Check if worktree has uncommitted changes
+is_worktree_dirty() {
+    local wt="$1"
+    [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]
+}
+
+# Get short path for display (relative to repo root)
+shorten_path() {
+    local path="$1"
+    if [[ "$path" == "$MAIN_REPO_ROOT"/* ]]; then
+        echo ".${path#$MAIN_REPO_ROOT}"
+    else
+        echo "$path"
+    fi
+}
+
+# Create a new worktree with provisioning
+create_worktree() {
+    local name="$1"
+    local base_ref="${2:-}"
+    local no_bundle="${3:-false}"
+
+    local worktree_path="$WORKTREES_DIR/$name"
+
+    # Determine base ref if not provided
+    if [[ -z "$base_ref" ]]; then
+        if git -C "$MAIN_REPO_ROOT" rev-parse --verify origin/master >/dev/null 2>&1; then
+            base_ref="origin/master"
+        elif git -C "$MAIN_REPO_ROOT" rev-parse --verify master >/dev/null 2>&1; then
+            base_ref="master"
+        else
+            base_ref="HEAD"
+        fi
+    fi
+
+    log "Creating worktree '$name' from $base_ref..."
+
+    # Check if branch already exists (refs/heads/<name>)
+    if git -C "$MAIN_REPO_ROOT" show-ref --verify --quiet "refs/heads/$name"; then
+        # Branch exists - check if it's checked out somewhere
+        local current_wt
+        current_wt=$(find_worktree_by_branch "$name") || true
+        if [[ -n "$current_wt" ]]; then
+            log "Branch '$name' is already checked out at $current_wt"
+            emit_cd_command "$current_wt"
+            exit 0
+        fi
+        # Branch exists but not checked out - check it out
+        log "Branch '$name' exists, checking out into new worktree..."
+        git -C "$MAIN_REPO_ROOT" worktree add "$worktree_path" "$name" >&2
+    else
+        # Create new branch and worktree
+        git -C "$MAIN_REPO_ROOT" worktree add -b "$name" "$worktree_path" "$base_ref" >&2
+    fi
+
+    # Provision the worktree (idempotent)
+    provision_worktree "$worktree_path" "$no_bundle"
+
+    log "Worktree ready at $worktree_path"
+    emit_cd_command "$worktree_path"
+}
+
+# Provision a worktree with symlinks and configs
+provision_worktree() {
+    local wt_path="$1"
+    local no_bundle="${2:-false}"
+
+    # Symlink .env if present in main repo
+    if [[ -f "$MAIN_REPO_ROOT/.env" ]]; then
+        # Remove any existing .env (from previous provisioning) before re-symlinking
+        rm -f "$wt_path/.env"
+        log "Symlinking .env"
+        ln -sf "$MAIN_REPO_ROOT/.env" "$wt_path/.env"
+    fi
+
+    # Ensure vendor/bundle and symlink it — Ruby projects only, so that reusing
+    # this script in other repos never creates a vendor/ directory.
+    if [[ -f "$MAIN_REPO_ROOT/Gemfile" ]] || [[ -d "$MAIN_REPO_ROOT/vendor/bundle" ]]; then
+        if [[ ! -d "$MAIN_REPO_ROOT/vendor/bundle" ]]; then
+            log "Creating vendor/bundle in main repo"
+            mkdir -p "$MAIN_REPO_ROOT/vendor/bundle"
+        fi
+        # Create vendor dir in worktree if needed before symlinking
+        if [[ ! -d "$wt_path/vendor" ]]; then
+            mkdir -p "$wt_path/vendor"
+        fi
+        log "Symlinking vendor/bundle"
+        ln -sf "$MAIN_REPO_ROOT/vendor/bundle" "$wt_path/vendor/bundle"
+    fi
+
+    # Symlink node_modules if present in main repo
+    if [[ -d "$MAIN_REPO_ROOT/node_modules" ]]; then
+        # Create node_modules placeholder in worktree if needed (it may not exist from git worktree add)
+        if [[ ! -e "$wt_path/node_modules" ]]; then
+            log "Symlinking node_modules"
+            ln -sf "$MAIN_REPO_ROOT/node_modules" "$wt_path/node_modules"
+        fi
+    fi
+
+    # Copy config/database.yml if present in main repo
+    if [[ -f "$MAIN_REPO_ROOT/config/database.yml" ]]; then
+        # Create config dir in worktree if needed
+        if [[ ! -d "$wt_path/config" ]]; then
+            mkdir -p "$wt_path/config"
+        fi
+        log "Copying config/database.yml"
+        cp "$MAIN_REPO_ROOT/config/database.yml" "$wt_path/config/database.yml"
+        log "Hint: Consider renaming the database name in this worktree's database.yml to avoid conflicts with the main checkout"
+    fi
+
+    # Copy .bundle/config if present in main repo (BUNDLE_PATH: vendor/bundle, etc.)
+    if [[ -f "$MAIN_REPO_ROOT/.bundle/config" ]]; then
+        mkdir -p "$wt_path/.bundle"
+        log "Copying .bundle/config"
+        cp "$MAIN_REPO_ROOT/.bundle/config" "$wt_path/.bundle/config"
+    fi
+
+    # Seed tmp/selenium-cache from main repo (Ruby projects with selenium cache only)
+    # Use APFS clone (copy-on-write) when available for speed, fall back to plain copy.
+    # This avoids re-downloading chromedriver in each worktree over slow networks.
+    if [[ -d "$MAIN_REPO_ROOT/tmp/selenium-cache" ]]; then
+        if [[ -e "$wt_path/tmp/selenium-cache" ]]; then
+            log "Skipping tmp/selenium-cache (already exists)"
+        else
+            mkdir -p "$wt_path/tmp"
+            log "Seeding tmp/selenium-cache (shared Selenium Manager cache)"
+            # Try APFS clone first (-c flag), fall back to plain recursive copy on failure
+            if ! cp -Rc "$MAIN_REPO_ROOT/tmp/selenium-cache" "$wt_path/tmp/" 2>/dev/null; then
+                # APFS clone failed (non-APFS filesystem or other issue); use plain copy
+                rm -rf "$wt_path/tmp/selenium-cache" 2>/dev/null || true
+                cp -R "$MAIN_REPO_ROOT/tmp/selenium-cache" "$wt_path/tmp/"
+            fi
+        fi
+    fi
+
+    # Run bundle install INSIDE the worktree (not the caller's CWD),
+    # unless --no-bundle or no Gemfile
+    if [[ "$no_bundle" != "true" ]] && [[ -f "$wt_path/Gemfile" ]]; then
+        log "Running bundle install..."
+        (cd "$wt_path" && bundle install --quiet)
+    fi
+
+    # Warn about non-ignored provisioned paths
+    warn_non_ignored_paths "$wt_path"
+}
+
+# Warn about provisioned paths that are not gitignored
+warn_non_ignored_paths() {
+    local wt_path="$1"
+    local provisioned_paths=(".env" "vendor/bundle" "node_modules" "config/database.yml" ".bundle/config" "tmp/selenium-cache")
+
+    for path in "${provisioned_paths[@]}"; do
+        if [[ -e "$wt_path/$path" ]]; then
+            # Check if git ignores this path in the worktree
+            if ! git -C "$wt_path" check-ignore -q "$path" 2>/dev/null; then
+                log "Warning: provisioned path '$path' is not ignored by git"
+                log "Hint: add '$path' to .gitignore to avoid dirty worktree status"
+            fi
+        fi
+    done
+}
+
+# List all worktrees
+cmd_list() {
+    if [[ ! -d "$WORKTREES_DIR" ]]; then
+        log "No worktrees found"
+        return 0
+    fi
+
+    for wt in "$WORKTREES_DIR"/*; do
+        [[ -d "$wt" ]] || continue
+        local name
+        name="$(basename "$wt")"
+        local branch
+        branch="$(get_worktree_branch "$wt")" || branch="unknown"
+        local status
+        if is_worktree_dirty "$wt"; then
+            status="dirty"
+        else
+            status="clean"
+        fi
+        echo "$name | $branch | $status"
+    done
+}
+
+# Remove a worktree
+cmd_rm() {
+    local name="$1"
+    local force="${2:-false}"
+
+    local worktree_path="$WORKTREES_DIR/$name"
+
+    if [[ ! -d "$worktree_path" ]]; then
+        log "Error: worktree '$name' does not exist at $worktree_path"
+        exit 1
+    fi
+
+    # Check if it's the current worktree
+    local current_wt
+    current_wt="$(git rev-parse --show-toplevel)"
+    if [[ "$(realpath "$worktree_path")" == "$(realpath "$current_wt")" ]]; then
+        log "Error: cannot remove the current worktree"
+        exit 1
+    fi
+
+    # Check for uncommitted changes unless --force
+    if [[ "$force" != "true" ]] && is_worktree_dirty "$worktree_path"; then
+        log "Error: worktree '$name' has uncommitted changes"
+        log "Use --force to remove anyway"
+        exit 1
+    fi
+
+    log "Removing worktree at $worktree_path"
+    if [[ "$force" == "true" ]]; then
+        git -C "$MAIN_REPO_ROOT" worktree remove --force "$worktree_path"
+    else
+        git -C "$MAIN_REPO_ROOT" worktree remove "$worktree_path"
+    fi
+    git -C "$MAIN_REPO_ROOT" worktree prune
+    log "Worktree '$name' removed"
+}
+
+# Show help
+cmd_help() {
+    cat << 'EOF'
+wt - git worktree helper
+
+Usage:
+    wt <name> [base-ref]     Switch to or create a worktree (default: origin/master)
+    wt list                  List all worktrees with branch and status
+    wt rm <name> [--force]   Remove a worktree (refuses if dirty, --force overrides)
+    wt help                  Show this help
+
+Options:
+    --no-bundle              Skip bundle install when creating a worktree
+
+The default subcommand (switch/create) prints ONLY a cd command to stdout.
+All other output goes to stderr. This allows shell integration.
+
+NOTE: When the caller's PATH lacks the tool directories (rbenv, Homebrew — e.g.
+`gh`, `node`), the printed line may end with `&& export PATH="..."` so that
+eval'ing it also fixes the caller's PATH. The wrapper's `eval "$out"` handles
+this automatically.
+
+Universal shell wrapper — add to ~/.zshrc (works from ANY directory in ANY repo).
+Script resolution order:
+  1) $WT_SCRIPT override;
+  2) the current repo's bin/wt (a tracked file — present in every checkout of
+     any repo that contains it, so `wt` adapts to the repo you stand in);
+  3) a global copy at ~/.local/bin/wt for repos that do not contain bin/wt.
+
+    # Add to ~/.zshrc:
+    wt() {
+        local out s
+        s="${WT_SCRIPT:-}"
+        if [ -z "$s" ]; then
+            s="$(git rev-parse --show-toplevel 2>/dev/null)/bin/wt"
+            [ -x "$s" ] || s="$HOME/.local/bin/wt"
+        fi
+        if [ ! -x "$s" ]; then
+            printf 'wt: helper not found — copy once: mkdir -p ~/.local/bin && cp <repo>/bin/wt ~/.local/bin/wt\n' >&2
+            return 1
+        fi
+        out="$("$s" "$@")" || return 1
+        case "$out" in
+            cd\ *) eval "$out" ;;
+            *) if [ -n "$out" ]; then printf '%s\n' "$out"; fi ;;
+        esac
+    }
+
+One-time global copy (optional; enables use in repos without bin/wt):
+    mkdir -p ~/.local/bin && cp <repo>/bin/wt ~/.local/bin/wt
+
+The helper must run from inside the target repo (any directory or worktree of
+it); outside a repo it exits with a clear error.
+
+Examples:
+    wt myfeature              Create worktree from origin/master, switch to it
+    wt myfeature master       Create worktree from local master branch
+    wt myfeature              Switch to existing worktree if branch checked out elsewhere
+    wt list                   Show all worktrees with status
+    wt rm myfeature           Remove (fails if dirty)
+    wt rm myfeature --force   Remove even with uncommitted changes
+
+EOF
+}
+
+# Main entry point
+main() {
+    local subcommand="${1:-}"
+
+    # Help works from anywhere, including outside a git repository.
+    case "$subcommand" in
+        help|--help|-h|"")
+            cmd_help
+            return 0
+            ;;
+    esac
+
+    # Everything else must run inside a work tree of some repo.
+    require_repo
+
+    case "$subcommand" in
+        list)
+            cmd_list
+            ;;
+        rm)
+            local name="${2:-}"
+            local force="false"
+            if [[ -z "$name" ]]; then
+                log "Error: specify worktree name to remove"
+                exit 1
+            fi
+            if [[ "${3:-}" == "--force" ]]; then
+                force="true"
+            fi
+            validate_name "$name"
+            cmd_rm "$name" "$force"
+            ;;
+        *)
+            # Default: switch or create
+            local name="$subcommand"
+            local base_ref=""
+            local no_bundle="false"
+
+            # Parse remaining arguments
+            shift
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --no-bundle)
+                        no_bundle="true"
+                        ;;
+                    *)
+                        if [[ -z "$base_ref" ]]; then
+                            base_ref="$1"
+                        else
+                            log "Error: unexpected argument '$1'"
+                            exit 1
+                        fi
+                        ;;
+                esac
+                shift
+            done
+
+            validate_name "$name"
+
+            local worktree_path="$WORKTREES_DIR/$name"
+
+            # If worktree exists, just switch
+            if [[ -d "$worktree_path" ]]; then
+                emit_cd_command "$worktree_path"
+                exit 0
+            fi
+
+            # Check if branch is checked out in another worktree
+            local existing_wt
+            existing_wt=$(find_worktree_by_branch "$name") || true
+            if [[ -n "$existing_wt" ]]; then
+                emit_cd_command "$existing_wt"
+                exit 0
+            fi
+
+            # Create new worktree
+            create_worktree "$name" "$base_ref" "$no_bundle"
+            ;;
+    esac
+}
+
+main "$@"

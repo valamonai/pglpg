@@ -12,6 +12,7 @@ module Pglpg
   #   Kg.storage.label_drift      # => {} when stored labels match the schema
   class Storage
     NAME_LIMIT = 63
+    MIN_SERVER_VERSION = 180_000
 
     attr_reader :graph, :nodes_table, :edges_table
 
@@ -22,6 +23,10 @@ module Pglpg
     end
 
     def create!(connection = graph.connection)
+      if connection.database_version < MIN_SERVER_VERSION
+        raise ConfigurationError, "pglpg needs PostgreSQL 18 or later"
+      end
+
       tables_sql(connection).each { connection.execute(_1) }
       sync_constraints!(connection)
     end

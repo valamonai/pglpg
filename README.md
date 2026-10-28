@@ -9,8 +9,8 @@ your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
 Status: **0.1, pre-release.** The design and its decisions live in the
-[pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 3.3,
-ActiveRecord ≥ 7.2 and PostgreSQL ≥ 14.
+[pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
+ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
 ## Define a graph
 

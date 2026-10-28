@@ -3,6 +3,7 @@
 ## 0.1.0 (unreleased)
 
 First version, following the accepted 0.1 baseline (knowen.md bb topic 145).
+Requires Ruby ≥ 4.0, ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18.
 
 - Graph type DSL: node types with inheritance and abstract types, edge types,
   typed properties (closed types), one string key per type, `unique: :pair`

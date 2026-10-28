@@ -5,7 +5,8 @@ on:
     branches: [master]
   pull_request:
 
-# One job on the latest Ruby, ActiveRecord and PostgreSQL. ActiveRecord is
+# One job on the latest Ruby, ActiveRecord and PostgreSQL, which are also the
+# minimum supported versions: specs, then the benchmark. ActiveRecord is
 # the newest release the gemspec allows (there is no committed lockfile).
 jobs:
   test:

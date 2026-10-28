@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
                      "and edge on every hop."
   spec.homepage = "https://github.com/valamonai/pglpg"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.3"
+  spec.required_ruby_version = ">= 4.0"
 
   spec.metadata["source_code_uri"] = spec.homepage
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/master/CHANGELOG.md"
@@ -21,6 +21,6 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md", "LICENSE"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "activerecord", ">= 7.2"
+  spec.add_dependency "activerecord", ">= 8.1"
   spec.add_dependency "pg", ">= 1.5"
 end

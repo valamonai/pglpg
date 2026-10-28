@@ -68,7 +68,9 @@ RSpec.describe Pglpg::Storage do
     a = insert_raw("Person", %w[Agent Person], { "uid" => "a" })
     b = insert_raw("Project", ["Project"], { "uid" => "b", "title" => "t" })
     conn.execute("INSERT INTO #{edges} (type, source_id, target_id, classification) VALUES ('WORKS_ON', #{a}, #{b}, 1)")
-    expect(raw_violation { conn.execute("DELETE FROM #{nodes} WHERE id = #{a}") }).to eq(PG::ForeignKeyViolation)
+    # PostgreSQL 18 reports RESTRICT as restrict_violation (23001), older versions as foreign_key_violation.
+    expect(raw_violation { conn.execute("DELETE FROM #{nodes} WHERE id = #{a}") })
+      .to eq(PG::ForeignKeyViolation).or eq(PG::RestrictViolation)
   end
 
   it "requires the key label to be among the labels" do

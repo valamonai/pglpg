@@ -312,7 +312,7 @@ module Pglpg
       id.to_i
     rescue ActiveRecord::StatementInvalid => e
       case e.cause
-      when PG::UniqueViolation, PG::ForeignKeyViolation then raise WriteRejected
+      when PG::UniqueViolation, PG::ForeignKeyViolation, PG::RestrictViolation then raise WriteRejected
       when PG::NotNullViolation, PG::CheckViolation then raise ValidationError, e.message
       else raise
       end

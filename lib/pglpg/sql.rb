@@ -64,6 +64,12 @@ module Pglpg
 
     def value = self
 
+    # Puts +str+ before the statement built so far (binds keep their numbers).
+    def prepend(str)
+      @parts.unshift(str)
+      self
+    end
+
     def to_s = @parts.join
   end
 end

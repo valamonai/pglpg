@@ -86,6 +86,8 @@ RSpec.describe Pglpg::Query do
     expect { ctx.match.node(:p, :Nope) }.to raise_error(ArgumentError, /unknown node type/)
     expect { q.node(:q) }.to raise_error(ArgumentError, /one start node/)
     expect { q.out(:KNOWS, :p, :Project) }.to raise_error(ArgumentError, /already bound/)
+    expect { q.out(:KNOWS, :q, :Person, edge: :q) }.to raise_error(ArgumentError, /already bound/)
+    expect { q.out(:KNOWS, :q, :Person, edge: :p) }.to raise_error(ArgumentError, /already bound/)
     expect { q.where(x: { name: "a" }) }.to raise_error(ArgumentError, /unknown variable/)
     expect { q.return(:x) }.to raise_error(ArgumentError)
     expect { q.where(p: { rank: 1..2 }) }.to raise_error(ArgumentError, /ranges/)
@@ -151,6 +153,16 @@ RSpec.describe Pglpg::Query do
   it "explains the generated SQL" do
     plan = ctx.match.node(:p, ref: ann).out(:WORKS_ON, :j, :Project).explain(analyze: true, buffers: true)
     expect(plan.join("\n")).to include("Execution Time")
+  end
+
+  it "applies the statement timeout to EXPLAIN ANALYZE" do
+    Pglpg.configure { _1.statement_timeout = 1 }
+    slow = Module.new do
+      def self.node(_table, _viewer) = Arel.sql("pg_sleep(0.05) IS NOT NULL")
+      def self.edge(_table, _viewer) = Arel.sql("TRUE")
+    end
+    Pglpg.configure { _1.visibility = slow }
+    expect { ctx.match.node(:p, :Person).explain(analyze: true) }.to raise_error(Pglpg::QueryTimeout)
   end
 
   it "builds immutable queries" do

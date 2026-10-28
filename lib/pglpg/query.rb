@@ -136,13 +136,12 @@ module Pglpg
       [sql.to_s, sql.binds.map(&:value)]
     end
 
-    # EXPLAIN output for the query, one line per entry.
+    # EXPLAIN output for the query, one line per entry. Runs under the same
+    # statement timeout as other reads, since ANALYZE executes the query.
     def explain(analyze: false, buffers: false)
-      sql = compile(:rows)
       options = ["FORMAT TEXT", ("ANALYZE" if analyze), ("BUFFERS" if buffers)].compact.join(", ")
-      context.graph.with_connection do |c|
-        c.select_rows("EXPLAIN (#{options}) #{sql}", "Pglpg explain", sql.binds).map(&:first)
-      end
+      sql = compile(:rows).prepend("EXPLAIN (#{options}) ")
+      context.read(sql).map { _1.fetch("QUERY PLAN") }
     end
 
     def inspect = "#<Pglpg::Query #{to_sql.first}>"
@@ -172,17 +171,18 @@ module Pglpg
         nodes = nodes.merge(var => NodePattern.new(var:, label:, ref_id: nil)).freeze
       end
 
-      edge_var = edge ? new_var!(edge) : :"_e#{@state.edges.size}"
+      # Checked against the node map including this hop's new node.
+      edge_var = edge ? new_var!(edge, nodes) : :"_e#{@state.edges.size}"
       pattern = EdgePattern.new(var: edge_var, type: edge_type.name, direction:, from_var: from, to_var: var,
                                 named: !edge.nil?)
       q = with(nodes:, edges: (@state.edges + [pattern]).freeze, last_var: var)
       props.empty? ? q : q.where(var => props)
     end
 
-    def new_var!(var)
+    def new_var!(var, nodes = @state.nodes)
       var = var.to_sym
       raise ArgumentError, "variable names starting with _ are reserved" if var.start_with?("_")
-      if @state.nodes.key?(var) || @state.edges.any? { _1.var == var }
+      if nodes.key?(var) || @state.edges.any? { _1.var == var }
         raise ArgumentError, "variable #{var} is already bound"
       end
 

@@ -27,7 +27,15 @@ Keep this file short. Durable knowledge belongs in the subgraph above, not here:
 
 ## Commands
 
-The commands for setup, tests, lint and docs live in [DEVELOPMENT.md](https://knowen.md/nodes/36331). Run every check listed there before you push, and fix any failure first. *(To be filled in when the gem skeleton exists.)*
+The commands for setup, tests, lint and docs live in [DEVELOPMENT.md](https://knowen.md/nodes/36331). Run every check listed there before you push, and fix any failure first. In short:
+
+```bash
+bundle exec rspec                                   # specs, including the leak and concurrency suites
+BENCH_SCALE=0.2 BENCH_RUNS=100 BENCH_MAX_P95_MS=250 BENCH_MAX_BUFFERS=50000 \
+  bundle exec ruby bench/run.rb                     # the benchmark with CI's limits
+```
+
+Releases follow [RELEASING.md](https://knowen.md/nodes/36332).
 
 ## Rules for library code
 

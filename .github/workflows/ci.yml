@@ -5,61 +5,36 @@ on:
     branches: [master]
   pull_request:
 
+# One job on the latest Ruby, ActiveRecord and PostgreSQL. ActiveRecord is
+# the newest release the gemspec allows (there is no committed lockfile).
 jobs:
   test:
-    name: Ruby ${{ matrix.ruby }} · PostgreSQL ${{ matrix.postgres }} · AR ${{ matrix.activerecord }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ruby: ["3.4"]
-        postgres: ["14", "15", "16", "17", "18"]
-        activerecord: ["8.1"]
-        include:
-          - { ruby: "3.3", postgres: "14", activerecord: "7.2" }
-          - { ruby: "3.3", postgres: "18", activerecord: "8.0" }
-    services:
-      postgres:
-        image: postgres:${{ matrix.postgres }}
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pglpg_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      AR_VERSION: ${{ matrix.activerecord }}
-      PGLPG_DATABASE_URL: postgres://postgres:postgres@localhost:5432/pglpg_test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-      - run: bundle exec rspec
-
-  bench:
-    name: Benchmark (PostgreSQL 18, reduced scale)
+    name: Ruby 4.0 · PostgreSQL 18 · latest ActiveRecord
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pglpg_bench
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      PGLPG_DATABASE_URL: postgres://postgres:postgres@localhost:5432/pglpg_test
       PGLPG_BENCH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/pglpg_bench
-      BENCH_SCALE: "0.2"
-      BENCH_RUNS: "100"
-      BENCH_MAX_P95_MS: "250"
-      BENCH_MAX_BUFFERS: "50000"
+      PGPASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4"
+          ruby-version: "4.0"
           bundler-cache: true
-      - run: bundle exec ruby bench/run.rb | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: createdb -h localhost -U postgres pglpg_test && createdb -h localhost -U postgres pglpg_bench
+      - run: bundle exec rspec
+      - name: Benchmark (reduced scale)
+        env:
+          BENCH_SCALE: "0.2"
+          BENCH_RUNS: "100"
+          BENCH_MAX_P95_MS: "250"
+          BENCH_MAX_BUFFERS: "50000"
+        run: bundle exec ruby bench/run.rb | tee -a "$GITHUB_STEP_SUMMARY"

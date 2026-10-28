@@ -23,6 +23,6 @@ with a `classification <= clearance` visibility policy on every node and edge.
 | `BENCH_MAX_BUFFERS` | `100000` | Fail if the hub query touches more buffers |
 | `BENCH_PLAN` | unset | `1` prints the hub query plan |
 
-CI runs it at scale 0.2 on PostgreSQL 18. Laptop numbers with a warm cache
+CI runs it at scale 0.2 on PostgreSQL 18, as a step of the single CI job. Laptop numbers with a warm cache
 are not production numbers; expect a small managed instance to be several
 times slower.

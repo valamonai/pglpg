@@ -256,24 +256,45 @@ puts "\npglpg #{Pglpg::VERSION} · #{pg.exec("SHOW server_version").getvalue(0, 
 puts "| Shape | Start | max_nodes | Executor | p50 (ms) | p95 (ms) | max (ms) | buffers p50 / p95 | nodes p95 | complete |"
 puts "|---|---|---|---|---|---|---|---|---|---|"
 fmt = ->(v) { v.infinite? ? "timeout" : format("%.2f", v) }
+cell = 0
 shapes.each do |shape|
   [[:random, runs], [:hub, hub_runs]].each do |kind, n|
     starts_rng = Random.new(42)
     starts = Array.new(n) { kind == :hub ? hub_for.(shape) : 1 + starts_rng.rand(persons) }
     caps.each do |cap|
-      EXECUTORS.each do |name, exec|
-        args = lambda { |start|
-          { start:, types: shape[:types], dir: shape[:dir], clearance: 4, max_depth: shape[:max_depth], max_nodes: cap }
-        }
-        3.times { exec.(pg, **args.(starts.first)) }
-        results = []
-        times = starts.map do |start|
+      args = lambda { |start|
+        { start:, types: shape[:types], dir: shape[:dir], clearance: 4, max_depth: shape[:max_depth], max_nodes: cap }
+      }
+      # Each executor gets its own block: warm every start (at least three
+      # calls), then time them, so no executor pays for pages another one
+      # loaded or evicted. Interleaving per start doesn't work here: from a
+      # hub, cte_walk touches more pages than shared_buffers holds and evicts
+      # whatever runs next. The block order rotates per cell, so none is
+      # always first. An executor that times out in warm-up is not measured.
+      warm = starts.uniq.cycle.first([starts.uniq.size, 3].max)
+      times_by = {}
+      results_by = {}
+      EXECUTORS.keys.rotate(cell).each do |name|
+        warm.each { EXECUTORS[name].(pg, **args.(_1)) }
+        results_by[name] = []
+        times_by[name] = starts.map do |start|
           t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          results << exec.(pg, **args.(start))
+          results_by[name] << EXECUTORS[name].(pg, **args.(start))
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t) * 1000
         rescue PG::QueryCanceled
           Float::INFINITY
-        end.sort
+        end
+      rescue PG::QueryCanceled
+        nil
+      end
+      cell += 1
+      EXECUTORS.each do |name, exec|
+        unless times_by.key?(name)
+          puts "| #{shape[:name]} | #{kind} | #{cap} | #{name} | timeout in warm-up | | | | | |"
+          next
+        end
+        times = times_by[name].sort
+        results = results_by[name]
         buffers = starts.first(buffer_samples).map do |start|
           total = 0
           exec.(pg, **args.(start), explain: ->(sql, params) { total += buffers_of(pg, sql, params) })

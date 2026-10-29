@@ -38,7 +38,7 @@ A spike for the 0.2 `reachable` API. It runs on the data `run.rb` loads, so run 
 - **`cte_walk`:** one recursive CTE over (node, depth) pairs, then `min(depth)` per node.
 - **`cte_bfs`:** one recursive CTE whose rows are whole levels (frontier and visited arrays), with the same `remaining + 1` cap per level.
 
-Before anything is timed, the script checks that all three return identical results on random and hub starts, at two clearances and several caps. It then reports p50 and p95 latency and shared buffers (`EXPLAIN (ANALYZE, BUFFERS)`) per shape, start kind and `max_nodes`.
+Before anything is timed, the script checks that all three return identical results on random and hub starts, at two clearances and several caps. It then times each executor in its own block, right after warming every start with it, with the block order rotating from cell to cell, and reports p50 and p95 latency and shared buffers (`EXPLAIN (ANALYZE, BUFFERS)`) per shape, start kind and `max_nodes`. An executor that times out during warm-up is reported as such and not measured.
 
 | Variable | Default | Meaning |
 |---|---|---|

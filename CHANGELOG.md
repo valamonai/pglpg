@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- `Context#reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)`
+  returns a `Pglpg::Reachability`: visible nodes with their minimum depth,
+  ordered by depth then id, plus `complete` and `stopped_at_depth`.
+  - Runs as one recursive CTE that computes one BFS level per step (ADR-0009),
+    so it sees one snapshot at any isolation level.
+  - The start node is never returned; a hidden start and a missing one give
+    the same empty, complete result.
+  - `direction:` follows the `match` rule from ADR-0008, and a `via` list may
+    not mix directed and symmetric types.
+  - `max_nodes` may not exceed `max_rows`. `deadline` (seconds) can only
+    shorten the configured `statement_timeout`.
+  - The shared leak suite observes `reachable` from every visible node.
+- `Context#read` takes a `timeout:` in milliseconds (internal).
 - Symmetric edge types (ADR-0008): `edge name, from:, to:, symmetric: true`,
   with `allow_self_loops: true` to permit self-loops (off by default).
   - Each edge is stored once with `source_id < target_id` (`<=` with self-loops),

@@ -134,6 +134,30 @@ Conditions are structured only: a value (equality), an array (one of), nil
 raise `Pglpg::TooManyRows` beyond `max_rows` (default 1000); reads run under
 `statement_timeout` (default 5 s) and raise `Pglpg::QueryTimeout`.
 
+## Reachability
+
+```ruby
+r = g.reachable(from: ann, via: %i[KNOWS], max_depth: 3, max_nodes: 500, deadline: 2.0)
+r.nodes             # => [[ref, 1], [ref, 1], [ref, 2], …]  by depth, then id
+r.complete?         # false when more visible nodes are reachable within max_depth
+r.stopped_at_depth  # depth of the last returned node when incomplete, else nil
+
+g.reachable(from: ann, via: %i[KNOWS], direction: :in, max_depth: 2, max_nodes: 100)
+g.reachable(from: ann, via: %i[FRIEND], direction: :both, max_depth: 2, max_nodes: 100)
+```
+
+Each visible node comes once, at its minimum depth; the start node never does.
+Hidden nodes and edges are never traversed, and a hidden or missing start gives
+an empty, complete result. `via` lists edge types that may be followed at any
+hop. `direction:` follows the same rule as `match`: `:both` takes only
+symmetric types, `:out` (the default) and `:in` only directed ones.
+`max_nodes` may not exceed `max_rows`.
+
+The traversal is one SQL statement (ADR-0009), so it sees one snapshot at any
+isolation level. `deadline` is in seconds and can only shorten the configured
+`statement_timeout`; with no timeout configured it applies alone. Running out
+of time raises `Pglpg::QueryTimeout` and leaves your transaction usable.
+
 ## Leak specs for your policy
 
 ```ruby

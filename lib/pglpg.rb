@@ -21,6 +21,7 @@ require_relative "pglpg/graph"
 require_relative "pglpg/context"
 require_relative "pglpg/writer"
 require_relative "pglpg/query"
+require_relative "pglpg/reachability"
 
 # Labeled property graphs stored in plain PostgreSQL tables.
 module Pglpg

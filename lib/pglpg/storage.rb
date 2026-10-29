@@ -92,6 +92,11 @@ module Pglpg
       type.edge_types.each_value do |t|
         is_type = "type = #{connection.quote(t.name.to_s)}"
         list << [:index, edges_table, "pair_#{t.name}", "ON #{e} (source_id, target_id) WHERE #{is_type}"] if t.unique_pair?
+        if t.symmetric?
+          # Canonical orientation, so a pair is stored one way only (ADR-0008).
+          list << [:check, edges_table, "sym_#{t.name}",
+                   "NOT (#{is_type}) OR source_id #{t.allow_self_loops? ? "<=" : "<"} target_id"]
+        end
         t.own_properties.each_value.select(&:required?).each do |p|
           list << [:check, edges_table, "req_#{t.name}_#{p.name}", "NOT (#{is_type}) OR #{typed_check(connection, p)}"]
         end

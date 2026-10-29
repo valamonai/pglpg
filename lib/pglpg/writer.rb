@@ -166,6 +166,14 @@ module Pglpg
     def write_edge(operation, edge_type, from, to, properties, attrs)
       @graph.check_ref!(from, :node)
       @graph.check_ref!(to, :node)
+      if edge_type.symmetric?
+        if from.id == to.id && !edge_type.allow_self_loops?
+          raise ArgumentError, "#{edge_type.name} does not allow self-loops"
+        end
+
+        # Stored in canonical orientation, so either order names the same pair.
+        from, to = to, from if from.id > to.id
+      end
       props = properties.transform_keys(&:to_sym)
       json = edge_type.encode_properties(props)
       cols = encode_attrs(@graph.type.edge_columns, attrs, insert: true)
@@ -183,9 +191,14 @@ module Pglpg
       end
       sql << " FROM " << table(@graph.nodes_table) << " AS s, " << table(@graph.nodes_table) << " AS t WHERE s.id = "
       sql.bind(from.id, "bigint") << " AND t.id = "
-      sql.bind(to.id, "bigint") << " AND s.labels @> "
-      sql.bind_text_array([edge_type.from]) << " AND t.labels @> "
-      sql.bind_text_array([edge_type.to]) << " AND "
+      sql.bind(to.id, "bigint") << " AND ("
+      endpoint_labels(sql, edge_type.from, edge_type.to)
+      if edge_type.symmetric? && edge_type.from != edge_type.to
+        # Either endpoint may carry either label.
+        sql << " OR "
+        endpoint_labels(sql, edge_type.to, edge_type.from)
+      end
+      sql << ") AND "
       @context.append_node_visible(sql, "s")
       sql << " AND "
       @context.append_node_visible(sql, "t")
@@ -201,6 +214,12 @@ module Pglpg
       end
       sql << " RETURNING id"
       ref(:edge, write(sql))
+    end
+
+    def endpoint_labels(sql, source_label, target_label)
+      sql << "(s.labels @> "
+      sql.bind_text_array([source_label]) << " AND t.labels @> "
+      sql.bind_text_array([target_label]) << ")"
     end
 
     def insert_node_values(sql, node_type, json, cols)

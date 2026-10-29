@@ -49,8 +49,8 @@ module Pglpg
         @graph_type.node_types[type.name] = type
       end
 
-      def edge(name, from:, to:, unique: nil, symmetric: false, temporal: false, &block)
-        type = EdgeType.new(name, from:, to:, unique:, symmetric:, temporal:)
+      def edge(name, from:, to:, unique: nil, symmetric: false, allow_self_loops: false, temporal: false, &block)
+        type = EdgeType.new(name, from:, to:, unique:, symmetric:, allow_self_loops:, temporal:)
         raise SchemaError, "type #{type.name} is declared twice" if declared?(type.name)
 
         ElementBuilder.new(type).instance_eval(&block) if block

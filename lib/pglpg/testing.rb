@@ -35,7 +35,12 @@ module Pglpg
         projects: -> { m.().node(:p, :Person).out(:WORKS_ON, :j, :Project).return(:j).distinct },
         page: -> { m.().node(:p, :Person).out(:WORKS_ON, :j, :Project).limit(2).offset(1) },
         ann: -> { m.().node(:p, :Person, name: "Ann").out(:WORKS_ON, :j, :Project) },
-        cid_knows: -> { m.().node(:p, :Person, name: "Cid").out(:KNOWS, :q) }
+        cid_knows: -> { m.().node(:p, :Person, name: "Cid").out(:KNOWS, :q) },
+        friends: -> { m.().node(:p, :Person).both(:FRIEND, :q, :Person, edge: :f) },
+        friend_edges: -> { m.().node(:p, :Person).both(:FRIEND, :q, edge: :f).return(:f).distinct },
+        friend_chain: -> { m.().node(:a, :Person).both(:FRIEND, :b).both(:FRIEND, :c) },
+        ann_friends: -> { m.().node(:p, :Person, name: "Ann").both(:FRIEND, :q) },
+        friends_page: -> { m.().node(:p, :Person).both(:FRIEND, :q).limit(2).offset(1) }
       }
       out = {}
       queries.each do |name, q|

@@ -47,6 +47,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
       end
       edge :BASED_AT, from: :Project, to: :Location
       edge :KNOWS, from: :Person, to: :Person
+      edge :FRIEND, from: :Person, to: :Person, symmetric: true
     end
   end
 
@@ -69,6 +70,9 @@ RSpec.shared_examples "a pglpg visibility policy" do
     node = ->(type, uid, attrs, **props) { seed.insert_node(type, properties: { uid:, **props }, attrs:) }
     edge = ->(type, from, to, attrs, **props) { seed.insert_edge(type, from:, to:, properties: props, attrs:) }
 
+    # Created first, so it has the smallest id: symmetric edges to it are
+    # stored with the hidden node in the source column.
+    h0 = person.("H0", "Abe", 0, hid)
     p1 = person.("P1", "Ann", 1, vis)
     p2 = person.("P2", "Bob", 2, vis)
     p3 = person.("P3", "Cid", 3, vis)
@@ -81,7 +85,9 @@ RSpec.shared_examples "a pglpg visibility policy" do
       edge.(:WORKS_ON, p3, j2, vis, role: "lead"),
       edge.(:BASED_AT, j1, l1, vis),
       edge.(:KNOWS, p1, p2, vis),
-      edge.(:KNOWS, p2, p3, vis)
+      edge.(:KNOWS, p2, p3, vis),
+      edge.(:FRIEND, p2, p1, vis),
+      edge.(:FRIEND, p3, p2, vis)
     ]
     visible_refs = [p1, p2, p3, j1, j2, l1, *visible_edges]
 
@@ -96,7 +102,13 @@ RSpec.shared_examples "a pglpg visibility policy" do
     hj = node.(:Project, "HJ", hid, title: "Apollo")
     hl = node.(:Location, "HL", hid)
     hidden_refs = [
-      h1, h2, hj, hl,
+      h0, h1, h2, hj, hl,
+      # symmetric edges: hidden between visible nodes, and visible ones through
+      # hidden nodes stored at either end (a hidden bridge p1 ~ h0 ~ p3)
+      edge.(:FRIEND, p3, p1, hid),
+      edge.(:FRIEND, p1, h0, vis),
+      edge.(:FRIEND, h0, p3, vis),
+      edge.(:FRIEND, p2, h1, vis),
       # hidden edges between visible nodes
       edge.(:WORKS_ON, p3, j1, hid, role: "lead"),
       edge.(:KNOWS, p3, p1, hid),

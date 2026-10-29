@@ -64,6 +64,23 @@ RSpec.describe Pglpg::Storage do
     expect(raw_violation { 2.times { conn.execute("INSERT INTO #{edges} (type, source_id, target_id, properties, classification) VALUES ('REVIEWED', #{a}, #{b}, '{\"score\": 1}', 1)") } }).to be_nil
   end
 
+  it "stores symmetric edges in canonical orientation, with self-loops only where allowed" do
+    a = insert_raw("Person", %w[Agent Person], { "uid" => "a" })
+    b = insert_raw("Person", %w[Agent Person], { "uid" => "b" })
+    edge = lambda do |type, from, to|
+      conn.execute("INSERT INTO #{edges} (type, source_id, target_id, classification) VALUES ('#{type}', #{from}, #{to}, 1)")
+    end
+    expect(raw_violation { edge.("MET", b, a) }).to eq(PG::CheckViolation)
+    expect(raw_violation { edge.("MET", a, a) }).to eq(PG::CheckViolation)
+    expect(raw_violation { edge.("MET", a, b) }).to be_nil
+    expect(raw_violation { edge.("SAME_AS", a, a) }).to be_nil
+    expect(raw_violation { edge.("SAME_AS", b, a) }).to eq(PG::CheckViolation)
+    expect(raw_violation { edge.("KNOWS", b, a) }).to be_nil
+    # Pair uniqueness on a symmetric type covers the unordered pair.
+    edge.("FRIEND", a, b)
+    expect(raw_violation { edge.("FRIEND", a, b) }).to eq(PG::UniqueViolation)
+  end
+
   it "restricts deleting nodes that have edges" do
     a = insert_raw("Person", %w[Agent Person], { "uid" => "a" })
     b = insert_raw("Project", ["Project"], { "uid" => "b", "title" => "t" })

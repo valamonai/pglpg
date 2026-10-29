@@ -36,10 +36,19 @@ RSpec.describe "graph type DSL" do
     expect { define { node(:A) { property :x, :enum } } }.to raise_error(Pglpg::SchemaError, /values/)
     expect { define { node(:A); node(:A) } }.to raise_error(Pglpg::SchemaError, /twice/)
     expect { define { node(:A); edge :E, from: :A, to: :Z } }.to raise_error(Pglpg::SchemaError, /unknown node type Z/)
-    expect { define { node(:A); edge :E, from: :A, to: :A, symmetric: true } }.to raise_error(Pglpg::SchemaError, /0.2/)
+    expect { define { node(:A); edge :E, from: :A, to: :A, allow_self_loops: true } }
+      .to raise_error(Pglpg::SchemaError, /needs symmetric/)
     expect { define { node(:A); edge :E, from: :A, to: :A, temporal: true } }.to raise_error(Pglpg::SchemaError, /0.3/)
     expect { define { node_column :labels, :string } }.to raise_error(Pglpg::SchemaError, /reserved/)
     expect { define { node "bad name" } }.to raise_error(Pglpg::SchemaError, /invalid/)
+  end
+
+  it "declares symmetric edge types, with self-loops off unless allowed" do
+    friend = Kg.type.edge_type!(:FRIEND)
+    same_as = Kg.type.edge_type!(:SAME_AS)
+    expect([friend.symmetric?, friend.allow_self_loops?, friend.unique_pair?]).to eq([true, false, true])
+    expect([same_as.symmetric?, same_as.allow_self_loops?]).to eq([true, true])
+    expect(Kg.type.edge_type!(:KNOWS).symmetric?).to be(false)
   end
 
   it "rejects two keys in one ancestry" do

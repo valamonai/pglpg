@@ -8,7 +8,7 @@ require "json"
 # fixture and the storage schema of the pglpg revision being measured.
 module Fixture
   # Bump when the generator changes what it loads.
-  GENERATOR_VERSION = 1
+  GENERATOR_VERSION = 2
   SEED = 0.42
   MANIFEST = "bench_manifest"
 
@@ -139,6 +139,11 @@ module Fixture
       *indexes
     ].each { conn.execute(_1) }
     storage.sync_constraints!
+    # ANALYZE samples 300 × the statistics target rows at random. At 10000
+    # that is 3M rows, so on tables up to 3M rows it reads them all and the
+    # statistics, and with them the plans, are the same on every load. The
+    # 10m edges table is larger and stays sampled.
+    conn.execute("SET default_statistics_target = 10000")
     conn.execute("ANALYZE #{n}")
     conn.execute("ANALYZE #{e}")
     stats = stats(conn, name, graph)

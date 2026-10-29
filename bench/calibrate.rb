@@ -6,17 +6,20 @@
 #
 #   ruby bench/calibrate.rb tmp/bench/candidate [more result dirs…]
 #
-# latency_ms: LATENCY_FACTOR × p95, at least LATENCY_MIN_MS (CI runners are
-# slower and noisier than a laptop), and at most the 0.2 target of 500 ms for
-# 3-hop shapes on 1m. buffers: BUFFER_FACTOR × p95, plus 10. Workload minima:
-# 80% of the rows returned; every hub and probe start must return rows.
+# Calibrate from CI results (the bench-<fixture> artifacts), not a laptop.
+# latency_ms: LATENCY_FACTOR × p95, at least LATENCY_MIN_MS, and at most the
+# 0.2 target of 500 ms for 3-hop shapes on 1m. buffers: BUFFER_FACTOR × p95,
+# plus 10, which leaves room for a plan change on 10m, where ANALYZE still
+# samples (bench/README.md). The relative gate, on one load and one set of
+# statistics, catches smaller regressions. Workload minima: 80% of the rows
+# returned; every hub and probe start must return rows.
 
 require "json"
 require "yaml"
 
-LATENCY_FACTOR = Float(ENV.fetch("LATENCY_FACTOR", "5"))
+LATENCY_FACTOR = Float(ENV.fetch("LATENCY_FACTOR", "3"))
 LATENCY_MIN_MS = Integer(ENV.fetch("LATENCY_MIN_MS", "10"))
-BUFFER_FACTOR = Float(ENV.fetch("BUFFER_FACTOR", "1.5"))
+BUFFER_FACTOR = Float(ENV.fetch("BUFFER_FACTOR", "3"))
 TARGET_MS = 500
 
 def bound(fixture, cell)

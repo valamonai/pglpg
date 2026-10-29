@@ -34,6 +34,12 @@ about `count / sqrt(persons)` edges of each type.
   viewer sees some of them.
 - **Seeded:** `setseed(0.42)` runs before the inserts, in one session without
   parallel inserts, so every load produces the same ids and edges.
+- **Deterministic statistics:** `ANALYZE` runs with
+  `default_statistics_target = 10000`, so it reads every row of a table up
+  to 3M rows. Below that size the statistics, the plans and the buffer counts
+  are the same on every load. Before this setting, one cell touched 414
+  buffers on one load and 10 on another. The `10m` edges table is larger, so
+  `ANALYZE` still samples it.
 - **Manifest:** the loader writes `bench_manifest` with the generator version,
   seed, fixture, scale, hubs, a fingerprint of the storage schema pglpg
   creates (tables, indexes and generated constraints), the counts and the load
@@ -118,12 +124,20 @@ driver refuses to run if any pglpg file is loaded from elsewhere.
   missing or failed baseline cell is reported, and fails the gate only with
   `--require-baseline`.
 - `bench/calibrate.rb RESULTS_DIR…` rewrites a fixture's bounds from measured
-  results: 5× p95 latency (at least 10 ms, at most the 500 ms target for
-  3-hop shapes on 1m), 1.5× p95 buffers plus 10, and 80% of the workload.
-  Review the diff before committing it.
-- `bench/selftest.rb RESULTS_DIR` breaches a latency bound, a buffer bound, a
-  workload minimum, a cell's status, a missing bound and the baseline
-  comparison in turn. It asserts that the gate exits 1 on each, and 0 on the
+  results, preferably the `bench-<fixture>` CI artifacts. It proposes 3× p95
+  latency (at least 10 ms, at most the 500 ms target for 3-hop shapes on 1m),
+  3× p95 buffers plus 10, and 80% of the workload. Review the diff before
+  committing it.
+- **Buffer bounds have room for a plan change.** On `10m`, `ANALYZE` still
+  samples the edges table (see *Fixtures*), so its plans can differ from load
+  to load. The relative gate compares revisions on one load and one set of
+  statistics, so it stays tight on every fixture.
+- The `10m` bounds come from a laptop run, with 10× latency, until a CI run
+  of `bench.yml` on master can replace them.
+- `bench/selftest.rb RESULTS_DIR` derives bounds that the results meet
+  exactly. It then breaches a latency bound, a buffer bound, a workload
+  minimum, a cell's status, a missing bound and the baseline comparison in
+  turn. It asserts that the gate exits 1 on each, and 0 on the
   untouched results. It also checks that buffer extraction raises on
   incomplete plans.
 

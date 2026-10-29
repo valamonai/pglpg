@@ -15,14 +15,23 @@ require_relative "support/plan"
 
 dir = ARGV.fetch(0) { abort "usage: ruby bench/selftest.rb RESULTS_DIR" }
 results = JSON.parse(File.read(File.join(dir, "results.json")))
-bounds = YAML.safe_load_file(File.expand_path("bounds.yml", __dir__))
+# Bounds the results meet exactly, so the self-test doesn't depend on
+# bench/bounds.yml (the gate step checks those).
+exact = YAML.safe_load_file(File.expand_path("bounds.yml", __dir__)).merge("fixtures" => {
+  results["fixture"] => results["cells"].values.select { _1["status"] == "ok" }.group_by { _1["shape"] }.transform_values do |cells|
+    cells.to_h do |c|
+      ["L#{c["clearance"]}", { "latency_ms" => c.dig("latency_ms", "p95"), "buffers" => c.dig("buffers", "p95"),
+                               "min_total" => c.dig("workload", "total"), "min_nonempty" => c.dig("workload", "nonempty") }]
+    end
+  end
+})
 key, cell = results.fetch("cells").find { |_, c| c["status"] == "ok" && c.dig("buffers", "p95").positive? }
 abort "no passing cell with buffers in #{dir}" unless cell
 shape = cell["shape"]
 level = "L#{cell["clearance"]}"
 problems = []
 
-gate = lambda do |name, results: nil, bounds: nil, baseline: nil, want:|
+gate = lambda do |name, results: nil, bounds: exact, baseline: nil, want:|
   Dir.mktmpdir do |tmp|
     args = ["--candidate", dir]
     if results
@@ -30,10 +39,8 @@ gate = lambda do |name, results: nil, bounds: nil, baseline: nil, want:|
       File.write(File.join(tmp, "c", "results.json"), JSON.generate(results))
       args = ["--candidate", File.join(tmp, "c")]
     end
-    if bounds
-      File.write(File.join(tmp, "bounds.yml"), bounds.to_yaml)
-      args += ["--bounds", File.join(tmp, "bounds.yml")]
-    end
+    File.write(File.join(tmp, "bounds.yml"), bounds.to_yaml)
+    args += ["--bounds", File.join(tmp, "bounds.yml")]
     if baseline
       FileUtils.mkdir_p(File.join(tmp, "b"))
       File.write(File.join(tmp, "b", "results.json"), JSON.generate(baseline))
@@ -47,7 +54,7 @@ gate = lambda do |name, results: nil, bounds: nil, baseline: nil, want:|
 end
 copy = ->(obj) { JSON.parse(JSON.generate(obj)) }
 breach = lambda do |field, value|
-  b = copy.(bounds)
+  b = copy.(exact)
   b["fixtures"][results["fixture"]][shape][level][field] = value
   b
 end
@@ -59,7 +66,7 @@ gate.("workload minimum breached", bounds: breach.("min_total", cell.dig("worklo
 failed = copy.(results)
 failed["cells"][key].merge!("status" => "failed", "errors" => ["timeout (30000 ms)"])
 gate.("a failed cell", results: failed, want: :fail)
-unbounded = copy.(bounds)
+unbounded = copy.(exact)
 unbounded["fixtures"][results["fixture"]][shape].delete(level)
 gate.("a cell without a bound", bounds: unbounded, want: :fail)
 cheaper = copy.(results).merge("sha" => "baseline")

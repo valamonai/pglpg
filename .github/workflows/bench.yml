@@ -1,0 +1,118 @@
+name: Benchmark
+
+# The full benchmark: the 1m, hub-heavy and 10m fixtures, each measured with
+# the candidate and a baseline revision on the same runner and fixture, then
+# gated by bench/gate.rb. See bench/README.md.
+#
+# Baseline: on a pull request, the merge-base with its target branch; on a
+# scheduled or manual run, the `baseline` input or else bench/BASELINE (the
+# last accepted baseline). Scheduled runs gate 10m on absolute bounds only;
+# a manual run with compare_10m compares it too, and then every 10m cell
+# needs a baseline measurement.
+on:
+  pull_request:
+    paths: [lib/**, bench/**, .github/workflows/bench.yml, Gemfile, pglpg.gemspec]
+  schedule:
+    - cron: "17 3 * * 1" # Mondays, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Baseline commit SHA (default bench/BASELINE)
+        required: false
+      compare_10m:
+        description: Compare the 10m fixture with the baseline too
+        type: boolean
+        default: false
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: ${{ matrix.fixture }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # 10m is too slow for every pull request.
+        fixture: ${{ fromJSON(github.event_name == 'pull_request' && '["1m", "hub-heavy"]' || '["1m", "hub-heavy", "10m"]') }}
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGLPG_BENCH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/pglpg_bench
+      PGPASSWORD: postgres
+      FIXTURE: ${{ matrix.fixture }}
+    defaults:
+      run:
+        shell: bash # -eo pipefail
+    steps:
+      - run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the baseline commit
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+      - name: Choose the baseline
+        id: baseline
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          INPUT_BASELINE: ${{ inputs.baseline }}
+          COMPARE_10M: ${{ inputs.compare_10m }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            sha=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$INPUT_BASELINE" ]; then
+            sha=$(git rev-parse --verify "$INPUT_BASELINE^{commit}")
+          else
+            sha=$(git rev-parse --verify "$(head -n1 bench/BASELINE)^{commit}")
+          fi
+          compare=true
+          if [ "$FIXTURE" = 10m ] && [ "$COMPARE_10M" != true ]; then compare=false; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "compare=$compare" >> "$GITHUB_OUTPUT"
+          echo "candidate $(git rev-parse HEAD), baseline $sha, compare $compare"
+      - run: createdb -h localhost -U postgres pglpg_bench
+      - name: Load the fixture
+        run: bundle exec ruby bench/measure.rb --fixture "$FIXTURE" --load-only
+      - name: Measure the baseline
+        if: steps.baseline.outputs.compare == 'true'
+        env:
+          SHA: ${{ steps.baseline.outputs.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/baseline"
+          git archive "$SHA" lib | tar -x -C "$RUNNER_TEMP/baseline"
+          PGLPG_LIB="$RUNNER_TEMP/baseline/lib" BENCH_SHA="$SHA" \
+            bundle exec ruby bench/measure.rb --fixture "$FIXTURE" --out tmp/bench/baseline --baseline
+      - name: Measure the candidate
+        run: bundle exec ruby bench/measure.rb --fixture "$FIXTURE" --out tmp/bench/candidate --no-load
+      - name: Gate
+        env:
+          COMPARE: ${{ steps.baseline.outputs.compare }}
+        run: |
+          args=(--candidate tmp/bench/candidate)
+          if [ "$COMPARE" = true ]; then args+=(--baseline tmp/bench/baseline); fi
+          if [ "$COMPARE" = true ] && [ "$FIXTURE" = 10m ]; then args+=(--require-baseline); fi
+          bundle exec ruby bench/gate.rb "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Job time
+        if: always()
+        run: |
+          mkdir -p tmp/bench
+          echo "Job time: $(( $(date +%s) - JOB_STARTED )) s" | tee tmp/bench/job-time.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.fixture }}
+          path: tmp/bench
+          retention-days: 90
+          if-no-files-found: ignore

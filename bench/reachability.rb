@@ -2,8 +2,8 @@
 
 # Spike for 0.2 task "Benchmark reachability executors": compares three ways
 # to compute bounded, minimum-depth reachability with the visibility policy on
-# every edge and every next node. Uses the data bench/run.rb loads; run that
-# first. See bench/README.md.
+# every edge and every next node. Uses a fixture that bench/measure.rb
+# loads; load one first. See bench/README.md.
 #
 #   bundle exec ruby bench/reachability.rb
 #   REACH_RUNS=50 REACH_MAX_NODES=500 bundle exec ruby bench/reachability.rb
@@ -44,7 +44,7 @@ pg.exec("SET max_parallel_workers_per_gather = 0") if ENV["REACH_NO_PARALLEL"] =
 
 N = "bench_nodes"
 E = "bench_edges"
-raise "no bench data in #{url}; run bench/run.rb first" unless pg.exec("SELECT to_regclass('#{N}')").getvalue(0, 0)
+raise "no bench data in #{url}; load one with bench/measure.rb --load-only first" unless pg.exec("SELECT to_regclass('#{N}')").getvalue(0, 0)
 
 Result = Data.define(:nodes, :complete, :stopped_at_depth)
 

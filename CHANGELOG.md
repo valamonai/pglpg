@@ -18,6 +18,15 @@
   now runs in a savepoint, also with `statement_timeout: nil`. A timeout set
   by the session itself no longer leaves the caller's transaction aborted.
 - The shared leak suite keeps its `reachable` budgets within `max_rows`.
+- The benchmark is rebuilt for CI (task 36367): seeded, versioned 1m,
+  hub-heavy and 10m fixtures with a manifest. Its cells cover viewers L2 and
+  L4, with starts each viewer can see, and include `reachable`. It gates
+  per-cell bounds in `bench/bounds.yml`, and compares buffers and latency
+  with a baseline revision. Buffers come from JSON plans and fail closed, and
+  a self-test proves that the gate fails. `bench/run.rb` is replaced by
+  `bench/measure.rb` and `bench/gate.rb`. A new `bench.yml` workflow runs the
+  full fixtures. The CI benchmark step no longer hides a failure behind
+  `tee`.
 - Symmetric edge types (ADR-0008): `edge name, from:, to:, symmetric: true`,
   with `allow_self_loops: true` to permit self-loops (off by default).
   - Each edge is stored once with `source_id < target_id` (`<=` with self-loops),

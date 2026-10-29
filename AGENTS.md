@@ -31,8 +31,7 @@ The commands for setup, tests, lint and docs live in [DEVELOPMENT.md](https://kn
 
 ```bash
 bundle exec rspec                                   # specs, including the leak and concurrency suites
-BENCH_SCALE=0.2 BENCH_RUNS=100 BENCH_MAX_P95_MS=250 BENCH_MAX_BUFFERS=50000 \
-  bundle exec ruby bench/run.rb                     # the benchmark with CI's limits
+bundle exec rake bench FIXTURE=ci                   # the benchmark with CI's bounds (bench/README.md)
 ```
 
 Releases follow [RELEASING.md](https://knowen.md/nodes/36332).

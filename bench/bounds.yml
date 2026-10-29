@@ -1,0 +1,213 @@
+# Declared bounds per cell: fixture → shape → viewer clearance. bench/gate.rb
+# fails a cell whose p95 latency (latency_ms) or p95 shared buffers (buffers)
+# exceeds its bound, or whose workload over its start list returns fewer than
+# min_total rows or min_nonempty non-empty starts. Every measured cell needs
+# a bound. Start from bench/calibrate.rb, then review: hop3 on 1m must stay
+# under the 0.2 target of 500 ms.
+#
+# relative: the comparison with a baseline revision on the same fixture.
+# Buffers may grow by buffer_allowance (or buffer_slack, if larger); p95
+# latency may grow by latency_ratio, a coarse slowdown guard, with both
+# sides raised to latency_floor_ms. Initial values, to tune on repeated runs.
+relative:
+  buffer_allowance: 0.1
+  buffer_slack: 5
+  latency_ratio: 2.0
+  latency_floor_ms: 1.0
+fixtures:
+  ci:
+    find_by_key:
+      L2: {latency_ms: 10, buffers: 19, min_total: 40, min_nonempty: 40}
+      L4: {latency_ms: 10, buffers: 19, min_total: 40, min_nonempty: 40}
+    hop1:
+      L2: {latency_ms: 10, buffers: 64, min_total: 48, min_nonempty: 28}
+      L4: {latency_ms: 10, buffers: 64, min_total: 71, min_nonempty: 33}
+    hop2:
+      L2: {latency_ms: 10, buffers: 127, min_total: 32, min_nonempty: 24}
+      L4: {latency_ms: 10, buffers: 127, min_total: 71, min_nonempty: 33}
+    hop3:
+      L2: {latency_ms: 18, buffers: 406, min_total: 73, min_nonempty: 27}
+      L4: {latency_ms: 23, buffers: 601, min_total: 221, min_nonempty: 33}
+    hop3_hub:
+      L2: {latency_ms: 202, buffers: 21208, min_total: 398, min_nonempty: 3}
+      L4: {latency_ms: 225, buffers: 32170, min_total: 895, min_nonempty: 3}
+    hop1_filtered:
+      L2: {latency_ms: 10, buffers: 64, min_total: 18, min_nonempty: 16}
+      L4: {latency_ms: 10, buffers: 64, min_total: 30, min_nonempty: 20}
+    count2_hub:
+      L2: {latency_ms: 27, buffers: 10030, min_total: 440, min_nonempty: 3}
+      L4: {latency_ms: 30, buffers: 13735, min_total: 892, min_nonempty: 3}
+    sym1:
+      L2: {latency_ms: 10, buffers: 97, min_total: 68, min_nonempty: 33}
+      L4: {latency_ms: 10, buffers: 97, min_total: 100, min_nonempty: 34}
+    sym2:
+      L2: {latency_ms: 16, buffers: 358, min_total: 288, min_nonempty: 31}
+      L4: {latency_ms: 13, buffers: 517, min_total: 463, min_nonempty: 34}
+    sym2_hub:
+      L2: {latency_ms: 88, buffers: 10471, min_total: 407, min_nonempty: 3}
+      L4: {latency_ms: 127, buffers: 13768, min_total: 737, min_nonempty: 3}
+    reach_knows_overflow:
+      L2: {latency_ms: 20, buffers: 13681, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 31, buffers: 19429, min_total: 1200, min_nonempty: 3}
+    reach_friend_overflow:
+      L2: {latency_ms: 10, buffers: 4492, min_total: 240, min_nonempty: 3}
+      L4: {latency_ms: 10, buffers: 6451, min_total: 240, min_nonempty: 3}
+    reach_knows_depth2:
+      L2: {latency_ms: 10, buffers: 220, min_total: 220, min_nonempty: 33}
+      L4: {latency_ms: 10, buffers: 349, min_total: 424, min_nonempty: 35}
+    reach_probe_negative:
+      L2: {latency_ms: 10, buffers: 73, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 49, min_total: 8, min_nonempty: 10}
+    reach_probe_positive:
+      L2: {latency_ms: 10, buffers: 433, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 145, min_total: 8, min_nonempty: 10}
+    reach_probe_depth_bound:
+      L2: {latency_ms: 10, buffers: 55, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 40, min_total: 8, min_nonempty: 10}
+  1m:
+    find_by_key:
+      L2: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+      L4: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+    hop1:
+      L2: {latency_ms: 10, buffers: 79, min_total: 51, min_nonempty: 27}
+      L4: {latency_ms: 10, buffers: 91, min_total: 64, min_nonempty: 29}
+    hop2:
+      L2: {latency_ms: 10, buffers: 115, min_total: 36, min_nonempty: 21}
+      L4: {latency_ms: 10, buffers: 187, min_total: 64, min_nonempty: 29}
+    hop3:
+      L2: {latency_ms: 19, buffers: 388, min_total: 76, min_nonempty: 24}
+      L4: {latency_ms: 22, buffers: 511, min_total: 218, min_nonempty: 36}
+    hop3_hub:
+      L2: {latency_ms: 212, buffers: 59902, min_total: 816, min_nonempty: 3}
+      L4: {latency_ms: 281, buffers: 97474, min_total: 1200, min_nonempty: 3}
+    hop1_filtered:
+      L2: {latency_ms: 10, buffers: 79, min_total: 12, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 91, min_total: 17, min_nonempty: 14}
+    count2_hub:
+      L2: {latency_ms: 21, buffers: 34474, min_total: 1138, min_nonempty: 3}
+      L4: {latency_ms: 26, buffers: 48181, min_total: 2293, min_nonempty: 3}
+    sym1:
+      L2: {latency_ms: 10, buffers: 118, min_total: 88, min_nonempty: 36}
+      L4: {latency_ms: 10, buffers: 130, min_total: 116, min_nonempty: 39}
+    sym2:
+      L2: {latency_ms: 12, buffers: 562, min_total: 536, min_nonempty: 33}
+      L4: {latency_ms: 23, buffers: 610, min_total: 1225, min_nonempty: 38}
+    sym2_hub:
+      L2: {latency_ms: 142, buffers: 25759, min_total: 797, min_nonempty: 3}
+      L4: {latency_ms: 171, buffers: 35641, min_total: 1149, min_nonempty: 3}
+    reach_knows_overflow:
+      L2: {latency_ms: 17, buffers: 14242, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 24, buffers: 21913, min_total: 1200, min_nonempty: 3}
+    reach_friend_overflow:
+      L2: {latency_ms: 10, buffers: 4837, min_total: 240, min_nonempty: 3}
+      L4: {latency_ms: 10, buffers: 5689, min_total: 240, min_nonempty: 3}
+    reach_knows_depth2:
+      L2: {latency_ms: 10, buffers: 307, min_total: 220, min_nonempty: 32}
+      L4: {latency_ms: 10, buffers: 355, min_total: 388, min_nonempty: 37}
+    reach_probe_negative:
+      L2: {latency_ms: 10, buffers: 67, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 55, min_total: 8, min_nonempty: 10}
+    reach_probe_positive:
+      L2: {latency_ms: 10, buffers: 307, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 355, min_total: 8, min_nonempty: 10}
+    reach_probe_depth_bound:
+      L2: {latency_ms: 10, buffers: 70, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 46, min_total: 8, min_nonempty: 10}
+  hub-heavy:
+    find_by_key:
+      L2: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+      L4: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+    hop1:
+      L2: {latency_ms: 10, buffers: 79, min_total: 51, min_nonempty: 27}
+      L4: {latency_ms: 10, buffers: 91, min_total: 64, min_nonempty: 29}
+    hop2:
+      L2: {latency_ms: 10, buffers: 115, min_total: 36, min_nonempty: 21}
+      L4: {latency_ms: 10, buffers: 187, min_total: 64, min_nonempty: 29}
+    hop3:
+      L2: {latency_ms: 12, buffers: 364, min_total: 76, min_nonempty: 24}
+      L4: {latency_ms: 14, buffers: 511, min_total: 218, min_nonempty: 36}
+    hop3_hub:
+      L2: {latency_ms: 316, buffers: 331456, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 399, buffers: 585907, min_total: 1200, min_nonempty: 3}
+    hop1_filtered:
+      L2: {latency_ms: 10, buffers: 79, min_total: 12, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 91, min_total: 17, min_nonempty: 14}
+    count2_hub:
+      L2: {latency_ms: 96, buffers: 103288, min_total: 10454, min_nonempty: 3}
+      L4: {latency_ms: 121, buffers: 154999, min_total: 19975, min_nonempty: 3}
+    sym1:
+      L2: {latency_ms: 10, buffers: 118, min_total: 92, min_nonempty: 37}
+      L4: {latency_ms: 10, buffers: 130, min_total: 131, min_nonempty: 40}
+    sym2:
+      L2: {latency_ms: 93, buffers: 1153, min_total: 2523, min_nonempty: 35}
+      L4: {latency_ms: 136, buffers: 24679, min_total: 7131, min_nonempty: 39}
+    sym2_hub:
+      L2: {latency_ms: 231, buffers: 152524, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 296, buffers: 185740, min_total: 1200, min_nonempty: 3}
+    reach_knows_overflow:
+      L2: {latency_ms: 22, buffers: 51460, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 27, buffers: 60172, min_total: 1200, min_nonempty: 3}
+    reach_friend_overflow:
+      L2: {latency_ms: 10, buffers: 20890, min_total: 240, min_nonempty: 3}
+      L4: {latency_ms: 10, buffers: 24154, min_total: 240, min_nonempty: 3}
+    reach_knows_depth2:
+      L2: {latency_ms: 10, buffers: 307, min_total: 220, min_nonempty: 32}
+      L4: {latency_ms: 10, buffers: 355, min_total: 388, min_nonempty: 37}
+    reach_probe_negative:
+      L2: {latency_ms: 10, buffers: 67, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 55, min_total: 8, min_nonempty: 10}
+    reach_probe_positive:
+      L2: {latency_ms: 10, buffers: 307, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 355, min_total: 8, min_nonempty: 10}
+    reach_probe_depth_bound:
+      L2: {latency_ms: 10, buffers: 70, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 46, min_total: 8, min_nonempty: 10}
+  10m:
+    find_by_key:
+      L2: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+      L4: {latency_ms: 10, buffers: 22, min_total: 40, min_nonempty: 40}
+    hop1:
+      L2: {latency_ms: 10, buffers: 103, min_total: 52, min_nonempty: 25}
+      L4: {latency_ms: 10, buffers: 103, min_total: 76, min_nonempty: 32}
+    hop2:
+      L2: {latency_ms: 10, buffers: 184, min_total: 40, min_nonempty: 20}
+      L4: {latency_ms: 10, buffers: 184, min_total: 76, min_nonempty: 32}
+    hop3:
+      L2: {latency_ms: 19, buffers: 631, min_total: 85, min_nonempty: 27}
+      L4: {latency_ms: 32, buffers: 886, min_total: 245, min_nonempty: 34}
+    hop3_hub:
+      L2: {latency_ms: 696, buffers: 206968, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 973, buffers: 333283, min_total: 1200, min_nonempty: 3}
+    hop1_filtered:
+      L2: {latency_ms: 10, buffers: 91, min_total: 19, min_nonempty: 12}
+      L4: {latency_ms: 10, buffers: 91, min_total: 27, min_nonempty: 16}
+    count2_hub:
+      L2: {latency_ms: 261, buffers: 114082, min_total: 3583, min_nonempty: 3}
+      L4: {latency_ms: 325, buffers: 154324, min_total: 6991, min_nonempty: 3}
+    sym1:
+      L2: {latency_ms: 10, buffers: 157, min_total: 76, min_nonempty: 30}
+      L4: {latency_ms: 10, buffers: 181, min_total: 103, min_nonempty: 36}
+    sym2:
+      L2: {latency_ms: 10, buffers: 532, min_total: 164, min_nonempty: 28}
+      L4: {latency_ms: 15, buffers: 829, min_total: 493, min_nonempty: 36}
+    sym2_hub:
+      L2: {latency_ms: 629, buffers: 87709, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 849, buffers: 126169, min_total: 1200, min_nonempty: 3}
+    reach_knows_overflow:
+      L2: {latency_ms: 58, buffers: 32914, min_total: 1200, min_nonempty: 3}
+      L4: {latency_ms: 68, buffers: 37843, min_total: 1200, min_nonempty: 3}
+    reach_friend_overflow:
+      L2: {latency_ms: 27, buffers: 19537, min_total: 240, min_nonempty: 3}
+      L4: {latency_ms: 32, buffers: 22465, min_total: 240, min_nonempty: 3}
+    reach_knows_depth2:
+      L2: {latency_ms: 10, buffers: 328, min_total: 244, min_nonempty: 32}
+      L4: {latency_ms: 10, buffers: 388, min_total: 428, min_nonempty: 36}
+    reach_probe_negative:
+      L2: {latency_ms: 10, buffers: 88, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 61, min_total: 8, min_nonempty: 10}
+    reach_probe_positive:
+      L2: {latency_ms: 10, buffers: 136, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 118, min_total: 8, min_nonempty: 10}
+    reach_probe_depth_bound:
+      L2: {latency_ms: 10, buffers: 61, min_total: 8, min_nonempty: 10}
+      L4: {latency_ms: 10, buffers: 52, min_total: 8, min_nonempty: 10}

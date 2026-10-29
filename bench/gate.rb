@@ -6,7 +6,7 @@
 #
 #   ruby bench/gate.rb --candidate tmp/bench/candidate                # absolute gate only
 #   ruby bench/gate.rb --candidate tmp/bench/candidate --baseline tmp/bench/baseline
-#   ruby bench/gate.rb ... --require-baseline   # an unavailable or partial baseline fails
+#   ruby bench/gate.rb ... --require-baseline   # an unavailable baseline, or one lacking an API, fails
 
 require "json"
 require "optparse"
@@ -17,7 +17,7 @@ OptionParser.new do |o|
   o.on("--candidate DIR") { opts[:candidate] = _1 }
   o.on("--baseline DIR") { opts[:baseline] = _1 }
   o.on("--bounds FILE") { opts[:bounds] = _1 }
-  o.on("--require-baseline", "fail unless every cell has a baseline comparison") { opts[:require_baseline] = true }
+  o.on("--require-baseline", "fail unless the baseline is available and supports every cell") { opts[:require_baseline] = true }
 end.parse!
 
 read = ->(dir) { JSON.parse(File.read(File.join(dir, "results.json"))) }
@@ -71,13 +71,19 @@ candidate.fetch("cells").each do |key, cell|
 
   versus = "–"
   if compare
+    # Both revisions run the same driver and cells, so a missing or failed
+    # baseline cell is a broken measurement and always fails. Only a cell
+    # whose API the baseline lacks is a note, unless --require-baseline.
     base = baseline.dig("cells", key)
-    if base.nil? || base["status"] == "unsupported"
+    if base.nil?
+      versus = "missing"
+      verdicts << "no baseline measurement"
+    elsif base["status"] == "unsupported"
       versus = "unsupported"
-      fail_with.("#{key}: no baseline measurement") if opts[:require_baseline]
+      verdicts << "baseline lacks the API" if opts[:require_baseline]
     elsif base["status"] != "ok"
       versus = "baseline failed"
-      fail_with.("#{key}: baseline failed") if opts[:require_baseline]
+      verdicts << "baseline failed: #{Array(base["errors"]).first(3).join("; ")}"
     elsif cell["status"] == "ok"
       base_buf = base.dig("buffers", "p95")
       allowed = [(base_buf * (1 + relative.fetch("buffer_allowance"))).floor, base_buf + relative.fetch("buffer_slack")].max

@@ -107,7 +107,7 @@ Cells.all(graph).each do |cell|
     ids = starts[clearance].fetch(cell.starts)
     g = graph.for(viewer: BenchGraph::Viewer.new(clearance))
     row = { "fixture" => fixture, "shape" => cell.id, "clearance" => clearance, "start_kind" => cell.starts.to_s,
-            "starts" => ids.size, "start_ids" => ids.first(10), "errors" => [] }
+            "starts" => ids.size, "errors" => [] }
     cells[key] = row
     if cell.requires && !cell.requires.(g)
       row["status"] = "unsupported"
@@ -121,14 +121,18 @@ Cells.all(graph).each do |cell|
 
     begin
       # Warm-up: every start at least once (three calls minimum). Its
-      # results are the workload checks.
-      sizes = ids.map do |id|
+      # results are the workload checks, kept per start as evidence.
+      per_start = ids.map do |id|
         r = cell.run.(g, id)
         (msg = cell.check.(r)) && row["errors"] << "start #{id}: #{msg}"
-        cell.size.(r)
+        record = { "id" => id, "size" => cell.size.(r) }
+        record.merge!("complete" => r.complete, "stopped_at_depth" => r.stopped_at_depth) if r.respond_to?(:stopped_at_depth)
+        record
       end
       (3 - ids.size).times { cell.run.(g, ids.first) } if ids.size < 3
+      sizes = per_start.map { _1["size"] }
       row["workload"] = { "total" => sizes.sum, "nonempty" => sizes.count(&:positive?), "starts" => sizes.size }
+      row["per_start"] = per_start
 
       n = cell.starts == :random ? runs : hub_runs
       times = Array.new(n) do |i|
@@ -145,6 +149,7 @@ Cells.all(graph).each do |cell|
         [id, statement, plan, Plan.buffers(plan)]
       end
       row["buffers"] = summary(measured.map(&:last))
+      measured.each { |id, *, buffers| per_start.find { _1["id"] == id }["buffers"] = buffers }
       worst = measured.max_by(&:last)
       slug = key.tr("/", "_")
       File.write(File.join(plan_dir, "#{slug}.json"), JSON.pretty_generate(measured.to_h { [_1.first.to_s, _1[2]] }))
@@ -162,5 +167,5 @@ Cells.all(graph).each do |cell|
   end
 end
 
-write.(base.merge("manifest" => manifest, "stats" => stats, "starts" => starts.transform_values { |s| s.transform_values { _1.first(10) } },
+write.(base.merge("manifest" => manifest, "stats" => stats, "starts" => starts,
                   "elapsed_seconds" => (clock - started).round(1), "cells" => cells))

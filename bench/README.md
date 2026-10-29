@@ -120,9 +120,11 @@ driver refuses to run if any pglpg file is loaded from elsewhere.
 - **Relative** (`--baseline`): buffers may grow by 10% (or by 5 buffers, if
   that's more) over the baseline. p95 latency may grow 2×, with both sides
   raised to 1 ms first. That ratio is a coarse slowdown guard, because
-  shared-runner latency is noisy. Both thresholds live in `bounds.yml`. A
-  missing or failed baseline cell is reported, and fails the gate only with
-  `--require-baseline`.
+  shared-runner latency is noisy. Both thresholds live in `bounds.yml`.
+  - A missing or failed baseline cell always fails the gate. Both revisions
+    run the same driver, so either one means a broken measurement.
+  - A cell whose API the baseline lacks (`unsupported`) is reported. It fails
+    only with `--require-baseline`, which also fails an unavailable baseline.
 - `bench/calibrate.rb RESULTS_DIR…` rewrites a fixture's bounds from measured
   results, preferably the `bench-<fixture>` CI artifacts. It proposes 3× p95
   latency (at least 10 ms, at most the 500 ms target for 3-hop shapes on 1m),

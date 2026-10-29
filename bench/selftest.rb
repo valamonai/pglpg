@@ -72,6 +72,14 @@ gate.("a cell without a bound", bounds: unbounded, want: :fail)
 cheaper = copy.(results).merge("sha" => "baseline")
 cheaper["cells"][key]["buffers"]["p95"] = (cell.dig("buffers", "p95") / 2) - 10
 gate.("buffers grew past the baseline", baseline: cheaper, want: :fail)
+same = copy.(results).merge("sha" => "baseline")
+gate.("an equal baseline", baseline: same, want: :pass)
+broken = copy.(same)
+broken["cells"][key].merge!("status" => "failed", "errors" => ["timeout (30000 ms)"])
+gate.("a failed baseline cell", baseline: broken, want: :fail)
+partial = copy.(same)
+partial["cells"].delete(key)
+gate.("a missing baseline cell", baseline: partial, want: :fail)
 
 # Buffer extraction fails closed.
 plan = [{ "Plan" => { "Node Type" => "Limit", "Shared Hit Blocks" => 7, "Shared Read Blocks" => 3 } }]

@@ -58,9 +58,11 @@ module Pglpg
         knows_capped: { via: %i[KNOWS], max_nodes: 1 },
         friends_capped: { via: %i[FRIEND], direction: :both, max_nodes: 1 }
       }
+      # Within the application's row cap, which may be smaller than 10.
+      budget = [10, Pglpg.configuration.max_rows].min
       reach.each do |name, args|
         out[:"reach_#{name}"] = refs.select(&:node?).map do |ref|
-          r = ctx.reachable(from: ref, max_depth: 3, max_nodes: 10, **args)
+          r = ctx.reachable(from: ref, max_depth: 3, max_nodes: budget, **args)
           [r.nodes.map { |node, depth| [node.id, depth] }, r.complete, r.stopped_at_depth]
         end
       end

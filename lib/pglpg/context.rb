@@ -99,12 +99,14 @@ module Pglpg
     end
 
     # Runs a read under +timeout+ (ms; default: the configured statement
-    # timeout). nil leaves the session's timeout as it is.
+    # timeout). nil leaves the session's timeout as it is. The read always
+    # runs in a savepoint, so a timeout (ours or the session's) never leaves
+    # the caller's transaction aborted.
     def read(sql, timeout: Pglpg.configuration.statement_timeout)
       graph.with_connection do |c|
-        next c.select_all(sql.to_s, "Pglpg", sql.binds).to_a if timeout.nil?
-
         c.transaction(requires_new: true) do
+          next c.select_all(sql.to_s, "Pglpg", sql.binds).to_a if timeout.nil?
+
           previous = c.select_value("SELECT current_setting('statement_timeout')")
           c.select_value("SELECT set_config('statement_timeout', '#{Integer(timeout)}', true)")
           rows = c.select_all(sql.to_s, "Pglpg", sql.binds).to_a

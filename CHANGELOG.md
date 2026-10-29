@@ -14,7 +14,10 @@
   - `max_nodes` may not exceed `max_rows`. `deadline` (seconds) can only
     shorten the configured `statement_timeout`.
   - The shared leak suite observes `reachable` from every visible node.
-- `Context#read` takes a `timeout:` in milliseconds (internal).
+- `Context#read` takes a `timeout:` in milliseconds (internal), and every read
+  now runs in a savepoint, also with `statement_timeout: nil`. A timeout set
+  by the session itself no longer leaves the caller's transaction aborted.
+- The shared leak suite keeps its `reachable` budgets within `max_rows`.
 - Symmetric edge types (ADR-0008): `edge name, from:, to:, symmetric: true`,
   with `allow_self_loops: true` to permit self-loops (off by default).
   - Each edge is stored once with `source_id < target_id` (`<=` with self-loops),

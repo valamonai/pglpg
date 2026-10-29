@@ -259,6 +259,27 @@ RSpec.describe "reachable" do
       expect(reach(a)).to eq(result([[b, 1]]))
     end
 
+    [nil, 0].each do |configured|
+      it "recovers from the session's own timeout with statement_timeout #{configured.inspect} and no deadline" do
+        Pglpg.configuration.statement_timeout = configured
+        Pglpg.configuration.visibility = SlowPolicy
+        connection.execute("SET LOCAL statement_timeout = '10ms'")
+        expect { reach(a) }.to raise_error(Pglpg::QueryTimeout)
+        expect(connection.select_value("SELECT 1")).to eq(1)
+        expect(session_timeout).to eq("10ms")
+      end
+    end
+
+    # Other reads keep the session timeout only when none is configured (a
+    # configured 0 disables it for them), and recover from it the same way.
+    it "lets match recover from the session's own timeout too" do
+      Pglpg.configuration.statement_timeout = nil
+      Pglpg.configuration.visibility = SlowPolicy
+      connection.execute("SET LOCAL statement_timeout = '10ms'")
+      expect { ctx.match.node(:p, ref: a).to_a }.to raise_error(Pglpg::QueryTimeout)
+      expect(connection.select_value("SELECT 1")).to eq(1)
+    end
+
     it "runs inside a READ COMMITTED caller transaction" do
       expect(connection.select_value("SHOW transaction_isolation")).to eq("read committed")
       expect(reach(a)).to eq(result([[b, 1]]))

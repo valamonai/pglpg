@@ -36,8 +36,13 @@ Kg = Pglpg::Graph.define(:kg) do
     property :role, :string
   end
   edge :KNOWS, from: :Person, to: :Person
+  edge :FRIEND, from: :Person, to: :Person, symmetric: true  # undirected
 end
 ```
+
+A `symmetric: true` edge type is undirected: each edge is stored once, smaller
+node id first, and writes accept the endpoints in either order. Self-loops are
+refused unless the type sets `allow_self_loops: true`.
 
 Property types: `string integer float decimal boolean date datetime enum list`
 (`enum` takes `values:`, `list` takes `of:`). Types are closed: undeclared
@@ -118,6 +123,10 @@ rows.first[:q]   # => #<Pglpg::Node ...>
 g.find(ref)                         # visible node or edge, else nil
 g.find_node(:Person, uid: "PER-12")
 query.count; query.exists?; query.first; query.distinct; query.explain(analyze: true)
+
+# Symmetric edge types use both (out and in refuse them). Each edge binds once
+# per orientation, so list edges once with return(:f).distinct.
+g.match.node(:p, ref: ann).both(:FRIEND, :q, :Person, edge: :f)
 ```
 
 Conditions are structured only: a value (equality), an array (one of), nil

@@ -145,6 +145,67 @@ RSpec.describe "writes" do
     end
   end
 
+  describe "symmetric edges" do
+    let(:ann) { person(1) }
+    let(:bob) { person(1) }
+    let(:lo) { [ann, bob].min_by(&:id) }
+    let(:hi) { [ann, bob].max_by(&:id) }
+
+    it "stores either order canonically, and the write policy sees that order" do
+      requests = []
+      recording = Module.new do
+        define_singleton_method(:authorize?) { |request| requests << request; true }
+      end
+      Pglpg.configure { _1.write_policy = recording }
+      ref = ctx.insert_edge(:MET, from: hi, to: lo, attrs: { classification: 1 })
+      edge = ctx.find(ref)
+      expect([edge.source, edge.target, edge.symmetric?]).to eq([lo, hi, true])
+      expect([requests.last.from, requests.last.to]).to eq([lo, hi])
+    end
+
+    it "treats both orders as the same pair for unique: :pair types" do
+      first = trusted.insert_edge(:FRIEND, from: lo, to: hi, attrs: { classification: 1 })
+      expect { trusted.insert_edge(:FRIEND, from: hi, to: lo, attrs: { classification: 1 }) }
+        .to raise_error(Pglpg::WriteRejected)
+      upserted = trusted.upsert_edge(:FRIEND, from: hi, to: lo, properties: { since: Date.new(2020, 1, 1) },
+                                              attrs: { classification: 1 })
+      expect(upserted).to eq(first)
+      expect(ctx.find(first)[:since]).to eq(Date.new(2020, 1, 1))
+    end
+
+    it "keeps parallel edges on the same pair when the type is not unique" do
+      e1 = ctx.insert_edge(:MET, from: lo, to: hi, attrs: { classification: 1 })
+      e2 = ctx.insert_edge(:MET, from: hi, to: lo, attrs: { classification: 1 })
+      expect(e1).not_to eq(e2)
+      expect([ctx.find(e2).source, ctx.find(e2).target]).to eq([lo, hi])
+    end
+
+    it "refuses self-loops unless the type allows them, before any SQL" do
+      expect { ctx.insert_edge(:MET, from: ann, to: ann, attrs: { classification: 1 }) }
+        .to raise_error(ArgumentError, /self-loops/)
+      loop = ctx.insert_edge(:SAME_AS, from: ann, to: ann, attrs: { classification: 1 })
+      expect(ctx.find(loop).other(ann)).to eq(ann)
+    end
+
+    it "accepts the endpoint labels in either order" do
+      j = project(1)
+      [ctx.insert_edge(:LINKED, from: ann, to: j, attrs: { classification: 1 }),
+       ctx.insert_edge(:LINKED, from: j, to: bob, attrs: { classification: 1 })].each do |ref|
+        expect(ctx.find(ref)).to be_a(Pglpg::Edge)
+      end
+      expect { ctx.insert_edge(:LINKED, from: ann, to: bob, attrs: { classification: 1 }) }
+        .to raise_error(Pglpg::WriteRejected)
+      expect { ctx.insert_edge(:LINKED, from: j, to: project(1), attrs: { classification: 1 }) }
+        .to raise_error(Pglpg::WriteRejected)
+    end
+
+    it "walks from one end to the other with Edge#other" do
+      edge = ctx.find(ctx.insert_edge(:MET, from: ann, to: bob, attrs: { classification: 1 }))
+      expect([edge.other(ann), edge.other(bob)]).to eq([bob, ann])
+      expect { edge.other(project(1)) }.to raise_error(ArgumentError, /not an endpoint/)
+    end
+  end
+
   describe "update_edge and delete_edge" do
     it "require the edge and both endpoints to be visible" do
       a = person(1)

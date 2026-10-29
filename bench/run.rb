@@ -39,19 +39,22 @@ Bench = Pglpg::Graph.define(:bench, visibility: Policy) do
   edge :INVOLVED_IN, from: :Person, to: :Incident
   edge :OCCURRED_AT, from: :Incident, to: :Location
   edge :MEMBER_OF, from: :Person, to: :Organization
+  edge :FRIEND, from: :Person, to: :Person, symmetric: true
 end
 
 counts = {
   persons: (120_000 * scale).round, incidents: (50_000 * scale).round,
   locations: (20_000 * scale).round, orgs: (10_000 * scale).round,
-  knows: (391_000 * scale).round, involved: (300_000 * scale).round, member: (250_000 * scale).round
+  knows: (391_000 * scale).round, involved: (300_000 * scale).round, member: (250_000 * scale).round,
+  friend: (200_000 * scale).round
 }
 n = Bench.nodes_table
 e = Bench.edges_table
 level = "width_bucket(random(), ARRAY[0, 0.7, 0.85, 0.95]::float8[])" # 70% L1, 15% L2, 10% L3, 5% L4
 
 loaded = conn.table_exists?(n) && conn.select_value("SELECT count(*) FROM #{n}").to_i ==
-                                 counts.values_at(:persons, :incidents, :locations, :orgs).sum
+                                 counts.values_at(:persons, :incidents, :locations, :orgs).sum &&
+         conn.select_value("SELECT EXISTS (SELECT 1 FROM #{e} WHERE type = 'FRIEND')")
 if reload || !loaded
   puts "loading scale #{scale}…"
   Bench.storage.drop!
@@ -90,6 +93,12 @@ if reload || !loaded
      SELECT 'MEMBER_OF', 1 + floor(random()^2 * #{p_last})::bigint,
             #{o_first} + floor(random() * #{counts[:orgs]})::bigint, #{level}
      FROM generate_series(1, #{counts[:member]})",
+    # Symmetric: stored once per pair, smaller id first (ADR-0008), skewed both ways.
+    "INSERT INTO #{e} (type, source_id, target_id, classification)
+     SELECT 'FRIEND', least(a, b), greatest(a, b), #{level}
+     FROM (SELECT 1 + floor(random()^2 * #{p_last})::bigint AS a, 1 + floor(random() * #{p_last})::bigint AS b
+           FROM generate_series(1, #{counts[:friend]})) x
+     WHERE a <> b",
     "ANALYZE #{n}", "ANALYZE #{e}"
   ].each { conn.execute(_1) }
 end
@@ -101,6 +110,11 @@ end
 
 edges_total = conn.select_value("SELECT count(*) FROM #{e}").to_i
 hub = conn.select_value("SELECT source_id FROM #{e} WHERE type = 'KNOWS' GROUP BY 1 ORDER BY count(*) DESC LIMIT 1").to_i
+friend_hub = conn.select_value(<<~SQL).to_i
+  SELECT id FROM (SELECT source_id AS id FROM #{e} WHERE type = 'FRIEND'
+                  UNION ALL SELECT target_id FROM #{e} WHERE type = 'FRIEND') x
+  GROUP BY 1 ORDER BY count(*) DESC LIMIT 1
+SQL
 persons = counts[:persons]
 rng = Random.new(42)
 person = -> { Bench.ref(:node, 1 + rng.rand(persons)) }
@@ -124,6 +138,13 @@ shapes = {
   },
   "count 2 hops from the hub" => lambda { |g|
     g.match.node(:p, ref: Bench.ref(:node, hub)).out(:KNOWS, :q, :Person).out(:MEMBER_OF, :o, :Organization).count
+  },
+  "symmetric 1 hop: person ~ friends" => ->(g) { g.match.node(:p, ref: person.()).both(:FRIEND, :q, :Person).limit(500).to_a },
+  "symmetric 2 hops: person ~ friend ~ friend" => lambda { |g|
+    g.match.node(:p, ref: person.()).both(:FRIEND, :q, :Person).both(:FRIEND, :r, :Person).limit(500).to_a
+  },
+  "symmetric 2 hops from the largest friend hub" => lambda { |g|
+    g.match.node(:p, ref: Bench.ref(:node, friend_hub)).both(:FRIEND, :q, :Person).both(:FRIEND, :r, :Person).limit(500).to_a
   }
 }
 
@@ -160,8 +181,14 @@ plan = g.match.node(:p, ref: Bench.ref(:node, hub)).out(:KNOWS, :q, :Person).out
 buffers = plan.first(3).join[/Buffers: shared hit=(\d+)(?: read=(\d+))?/] ? ($1.to_i + $2.to_i) : 0
 puts "\nhub 3-hop query, L4: #{buffers} shared buffers (limit #{max_buffers})"
 failures << "hub 3-hop query touched #{buffers} buffers > #{max_buffers}" if buffers > max_buffers
+sym_plan = g.match.node(:p, ref: Bench.ref(:node, friend_hub)).both(:FRIEND, :q, :Person).both(:FRIEND, :r, :Person)
+            .limit(500).explain(analyze: true, buffers: true)
+sym_buffers = sym_plan.first(3).join[/Buffers: shared hit=(\d+)(?: read=(\d+))?/] ? ($1.to_i + $2.to_i) : 0
+puts "symmetric 2-hop query from the friend hub, L4: #{sym_buffers} shared buffers (limit #{max_buffers})"
+failures << "symmetric hub query touched #{sym_buffers} buffers > #{max_buffers}" if sym_buffers > max_buffers
 if ENV["BENCH_PLAN"] == "1"
   puts "\n```", plan, "```"
+  puts "\n```", sym_plan, "```"
 end
 
 if failures.any?

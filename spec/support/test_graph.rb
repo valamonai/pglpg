@@ -64,6 +64,12 @@ Kg = Pglpg::Graph.define(:spec_kg) do
   edge :REVIEWED, from: :Person, to: :Project do
     property :score, :integer, required: true
   end
+  edge :FRIEND, from: :Person, to: :Person, symmetric: true, unique: :pair do
+    property :since, :date
+  end
+  edge :MET, from: :Person, to: :Person, symmetric: true
+  edge :SAME_AS, from: :Person, to: :Person, symmetric: true, allow_self_loops: true
+  edge :LINKED, from: :Person, to: :Project, symmetric: true
 end
 
 module TestGraph

@@ -111,7 +111,8 @@ module Pglpg
         source: ref(:node, row["source_id"]), target: ref(:node, row["target_id"]),
         properties: edge_type ? edge_type.decode_properties(row["properties"]) : row["properties"].transform_keys(&:to_sym).freeze,
         attrs: decode_attrs(type.edge_columns, row),
-        created_at: Time.iso8601(row["created_at"]), updated_at: Time.iso8601(row["updated_at"])
+        created_at: Time.iso8601(row["created_at"]), updated_at: Time.iso8601(row["updated_at"]),
+        symmetric: edge_type&.symmetric? || false
       )
     end
 

@@ -49,6 +49,11 @@ module Pglpg
     # Follows an incoming edge of +type+ into +from+ (default: the last node).
     def in(type, var, label = nil, edge: nil, from: nil, **props) = hop(:in, type, var, label, edge, from, props)
 
+    # Follows an edge of a symmetric +type+ from +from+ (default: the last
+    # node), whichever end it is stored at: GQL's ~[ ]~ (ADR-0008). Each edge
+    # binds once per orientation that fits, so a self-loop binds once.
+    def both(type, var, label = nil, edge: nil, from: nil, **props) = hop(:both, type, var, label, edge, from, props)
+
     # Structured conditions per variable: where(j: { headcount: Pglpg.gt(0) }).
     def where(by_var)
       conditions = @state.conditions.transform_values(&:dup)
@@ -156,6 +161,12 @@ module Pglpg
       raise ArgumentError, "start the pattern with node" if @state.nodes.empty?
 
       edge_type = context.graph.type.edge_type!(type)
+      if edge_type.symmetric? && direction != :both
+        raise ArgumentError, "#{edge_type.name} is symmetric; use both"
+      elsif !edge_type.symmetric? && direction == :both
+        raise ArgumentError, "#{edge_type.name} is directed; use out or in"
+      end
+
       from = (from || @state.last_var).to_sym
       raise ArgumentError, "#{from} is not a node variable" unless @state.nodes.key?(from)
 
@@ -282,9 +293,22 @@ module Pglpg
 
       @state.edges.each_with_index do |edge, i|
         e = names.fetch(edge.var)
-        near, far = edge.direction == :out ? %w[source_id target_id] : %w[target_id source_id]
-        sql << " JOIN " << edges_table << " AS " << e << " ON " << e << "." << near << " = " << names.fetch(edge.from_var)
-        sql << ".id AND " << e << ".type = "
+        x = "#{names.fetch(edge.from_var)}.id"
+        sql << " JOIN " << edges_table << " AS " << e << " ON "
+        case edge.direction
+        when :out
+          sql << e << ".source_id = " << x
+          far = "#{e}.target_id"
+        when :in
+          sql << e << ".target_id = " << x
+          far = "#{e}.source_id"
+        else
+          # Either stored column; the far end is the other one. A self-loop
+          # matches both conditions but is still one row.
+          sql << "(" << e << ".source_id = " << x << " OR " << e << ".target_id = " << x << ")"
+          far = "(CASE WHEN #{e}.source_id = #{x} THEN #{e}.target_id ELSE #{e}.source_id END)"
+        end
+        sql << " AND " << e << ".type = "
         sql.bind(edge.type.to_s, "text")
         sql << " AND "
         context.append_edge_visible(sql, e)
@@ -295,10 +319,10 @@ module Pglpg
         end
 
         if bound.include?(edge.to_var)
-          sql << " AND " << e << "." << far << " = " << names.fetch(edge.to_var) << ".id"
+          sql << " AND " << far << " = " << names.fetch(edge.to_var) << ".id"
         else
           n = names.fetch(edge.to_var)
-          sql << " JOIN " << nodes_table << " AS " << n << " ON " << n << ".id = " << e << "." << far << " AND "
+          sql << " JOIN " << nodes_table << " AS " << n << " ON " << n << ".id = " << far << " AND "
           node_conditions(sql, @state.nodes.fetch(edge.to_var), n)
           bound << edge.to_var
         end

@@ -138,8 +138,6 @@ driver refuses to run if any pglpg file is loaded from elsewhere.
   samples the edges table (see *Fixtures*), so its plans can differ from load
   to load. The relative gate compares revisions on one load and one set of
   statistics, so it stays tight on every fixture.
-- The `10m` bounds come from a laptop run, with 10× latency, until a CI run
-  of `bench.yml` on master can replace them.
 - `bench/selftest.rb RESULTS_DIR` derives bounds that the results meet
   exactly. It then breaches a latency bound, a buffer bound, a workload
   minimum, a cell's status, a missing bound and the baseline comparison in

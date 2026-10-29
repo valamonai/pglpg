@@ -32,10 +32,18 @@ jobs:
           bundler-cache: true
       - run: createdb -h localhost -U postgres pglpg_test && createdb -h localhost -U postgres pglpg_bench
       - run: bundle exec rspec
-      - name: Benchmark (reduced scale)
-        env:
-          BENCH_SCALE: "0.2"
-          BENCH_RUNS: "100"
-          BENCH_MAX_P95_MS: "250"
-          BENCH_MAX_BUFFERS: "50000"
-        run: bundle exec ruby bench/run.rb | tee -a "$GITHUB_STEP_SUMMARY"
+      # The reduced-scale fixture with absolute bounds only. The full
+      # fixtures and the baseline comparison run in bench.yml.
+      - name: Benchmark (ci fixture)
+        run: bundle exec ruby bench/measure.rb --fixture ci --out tmp/bench/ci
+      - name: Benchmark self-test
+        run: bundle exec ruby bench/selftest.rb tmp/bench/ci
+      - name: Benchmark gate
+        shell: bash # -o pipefail, so tee doesn't hide the gate's exit status
+        run: bundle exec ruby bench/gate.rb --candidate tmp/bench/ci | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-ci
+          path: tmp/bench
+          if-no-files-found: ignore

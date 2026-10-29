@@ -48,6 +48,16 @@ module Pglpg
       match.node(:n, type, **key).first&.fetch(:n)
     end
 
+    # Visible nodes reachable from +from+ within +max_depth+ hops over the
+    # edge types in +via+, each with its minimum depth (a Reachability).
+    # Hidden nodes and edges are never traversed. The traversal is one
+    # statement; +deadline+ (seconds) can only shorten the configured
+    # statement timeout. See ADR-0009.
+    #   ctx.reachable(from: ref, via: %i[KNOWS], max_depth: 3, max_nodes: 500)
+    def reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)
+      Reachable.new(self, from:, via:, direction:, max_depth:, max_nodes:, deadline:).call
+    end
+
     def insert_node(type, properties: {}, attrs: {}) = writer.insert_node(type, properties:, attrs:)
 
     def update_node(ref, properties: {}, attrs: {}) = writer.update_node(ref, properties:, attrs:)
@@ -88,13 +98,15 @@ module Pglpg
       sql << ")"
     end
 
-    # Runs a read under the configured statement timeout.
-    def read(sql)
+    # Runs a read under +timeout+ (ms; default: the configured statement
+    # timeout). nil leaves the session's timeout as it is. The read always
+    # runs in a savepoint, so a timeout (ours or the session's) never leaves
+    # the caller's transaction aborted.
+    def read(sql, timeout: Pglpg.configuration.statement_timeout)
       graph.with_connection do |c|
-        timeout = Pglpg.configuration.statement_timeout
-        next c.select_all(sql.to_s, "Pglpg", sql.binds).to_a if timeout.nil?
-
         c.transaction(requires_new: true) do
+          next c.select_all(sql.to_s, "Pglpg", sql.binds).to_a if timeout.nil?
+
           previous = c.select_value("SELECT current_setting('statement_timeout')")
           c.select_value("SELECT set_config('statement_timeout', '#{Integer(timeout)}', true)")
           rows = c.select_all(sql.to_s, "Pglpg", sql.binds).to_a

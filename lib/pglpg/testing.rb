@@ -49,6 +49,23 @@ module Pglpg
         out[:"#{name}_exists"] = q.().exists?
         out[:"#{name}_first"] = q.().first&.transform_values { element_data(_1) }
       end
+      reach = {
+        knows: { via: %i[KNOWS] },
+        knows_in: { via: %i[KNOWS], direction: :in },
+        friends: { via: %i[FRIEND], direction: :both },
+        works: { via: %i[WORKS_ON BASED_AT] },
+        works_in: { via: %i[WORKS_ON BASED_AT], direction: :in },
+        knows_capped: { via: %i[KNOWS], max_nodes: 1 },
+        friends_capped: { via: %i[FRIEND], direction: :both, max_nodes: 1 }
+      }
+      # Within the application's row cap, which may be smaller than 10.
+      budget = [10, Pglpg.configuration.max_rows].min
+      reach.each do |name, args|
+        out[:"reach_#{name}"] = refs.select(&:node?).map do |ref|
+          r = ctx.reachable(from: ref, max_depth: 3, max_nodes: budget, **args)
+          [r.nodes.map { |node, depth| [node.id, depth] }, r.complete, r.stopped_at_depth]
+        end
+      end
       out[:last_by_name] = element_data(m.().node(:p, :Person).order(p: { name: :desc }).first&.fetch(:p))
       out[:find] = refs.map { element_data(ctx.find(_1)) }
       out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, uid: _1)) }

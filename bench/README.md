@@ -34,12 +34,16 @@ about `count / sqrt(persons)` edges of each type.
   viewer sees some of them.
 - **Seeded:** `setseed(0.42)` runs before the inserts, in one session without
   parallel inserts, so every load produces the same ids and edges.
-- **Deterministic statistics:** `ANALYZE` runs with
-  `default_statistics_target = 10000`, so it reads every row of a table up
-  to 3M rows. Below that size the statistics, the plans and the buffer counts
-  are the same on every load. Before this setting, one cell touched 414
-  buffers on one load and 10 on another. The `10m` edges table is larger, so
-  `ANALYZE` still samples it.
+- **Deterministic statistics:** `updated_at`, which no query reads, has a
+  statistics target of 10,000, so `ANALYZE` reads every row of a table up to
+  3M rows. Each column's statistics are still built at its own target, and
+  every other column keeps the default. Below that size, the statistics, the
+  plans and the buffer counts are the same on every load and every machine.
+  - Without this, one cell touched 414 buffers on one load and 10 on another.
+  - Raising the target on every column instead made each hub query spend
+    over 100 ms planning: the join estimate compares MCV lists pairwise.
+  - The `10m` edges table is larger than 3M rows, so `ANALYZE` still samples
+    it.
 - **Manifest:** the loader writes `bench_manifest` with the generator version,
   seed, fixture, scale, hubs, a fingerprint of the storage schema pglpg
   creates (tables, indexes and generated constraints), the counts and the load

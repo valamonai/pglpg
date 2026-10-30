@@ -68,7 +68,7 @@ module Pglpg
       end
       out[:last_by_name] = element_data(m.().node(:p, :Person).order(p: { name: :desc }).first&.fetch(:p))
       out[:find] = refs.map { element_data(ctx.find(_1)) }
-      out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, uid: _1)) }
+      out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, namespace: _1 == "H1" ? "hidden" : "visible", uid: _1)) }
       out.merge(observe_models(ctx, refs))
     end
 

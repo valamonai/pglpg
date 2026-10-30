@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Scoped keys (ADR-0012): `key :uid, scope: :namespace` enforces a required
+  string namespace/key pair across the declaring type and subtypes. Interactive
+  caller-chosen keys require an explicit `key_scope_allowed` grant to learn
+  occupancy within that graph/domain/scope, including hidden collisions. The
+  grant gives no row access and has no SQL-time revocation guarantee. Trusted
+  upserts and `find_node` require both parts; scope and key remain immutable.
+  Existing schemas require a transactional backfill and constraint migration.
+
 - Add `with_associations` to model relations for batched, visibility-aware eager loading (ADR-0011). Preloaded associations are materialized reads and can become stale; reload, save, or destroy clears that instance's cache. Each batch uses a separate database snapshot and raises `TooManyRows` when its distinct owner–target pairs exceed `max_rows`.
 
 - Model layer, reads (ADR-0010; `require "pglpg/model"`):

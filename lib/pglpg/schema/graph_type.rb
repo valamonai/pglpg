@@ -91,9 +91,10 @@ module Pglpg
 
     class NodeBuilder < ElementBuilder
       # Declares an exclusive key. Interactive inserts get a value from
-      # +generate+ (default: a random UUID); callers never choose it.
-      def key(name, generate: nil)
-        @type.key_property(name, generate:)
+      # +generate+ (default: a random UUID). Scoped keys may be caller-chosen
+      # with an explicit key_scope_allowed grant.
+      def key(name, generate: nil, scope: nil)
+        @type.key_property(name, generate:, scope:)
       end
     end
   end

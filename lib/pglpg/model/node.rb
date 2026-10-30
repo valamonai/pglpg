@@ -191,8 +191,10 @@ module Pglpg
 
         if new_record?
           errors.add(key, "is generated and cannot be assigned") unless attribute(key.to_s).nil?
-        elsif attribute_changed?(key.to_s)
-          errors.add(key, "cannot be changed")
+        else
+          schema_type.key.properties.each do |property|
+            errors.add(property, "cannot be changed") if attribute_changed?(property.to_s)
+          end
         end
       end
     end

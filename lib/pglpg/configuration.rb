@@ -16,6 +16,9 @@ module Pglpg
     # may be used for that context. Unset means the capability is never granted.
     attr_accessor :trusted_writer_allowed
 
+    # Explicit permission to learn key occupancy in a scoped key domain.
+    attr_accessor :key_scope_allowed
+
     # The ActiveRecord class whose connection pglpg uses.
     attr_accessor :connection_class
 

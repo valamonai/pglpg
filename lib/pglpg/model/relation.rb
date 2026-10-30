@@ -19,6 +19,7 @@ module Pglpg
         @query = query || model.pattern(context)
         @filtered = filtered
         @shaped = false
+        @preload = {}.freeze
         freeze
       end
 
@@ -33,7 +34,19 @@ module Pglpg
 
       def offset(n) = derive(@query.offset(n), shaped: true)
 
-      def to_a = compiled.to_a.map { |row| load_row(row) }
+      def to_a
+        records = rows
+        preload(records, @preload, model) unless @preload.empty?
+        records
+      end
+
+      def with_associations(*spec)
+        tree = merge_tree(@preload, parse_tree(spec, []))
+        validate_tree(model, tree)
+        copy = clone(freeze: false)
+        copy.instance_variable_set(:@preload, tree)
+        copy.freeze
+      end
 
       def each(&) = to_a.each(&)
 
@@ -71,7 +84,7 @@ module Pglpg
         names = pluck_names!(model, names)
         raise ArgumentError, "pluck needs at least one name" if names.empty?
 
-        to_a.map { |record| unwrap(project(record, names)) }
+        rows.map { |record| unwrap(project(record, names)) }
       end
 
       # A new record bound to the relation's context.
@@ -92,6 +105,72 @@ module Pglpg
       def inspect = "#<#{self.class.name} #{model.name || model.base_class.name} #{compiled.to_sql.first}>"
 
       private
+
+      def rows = compiled.to_a.map { |row| load_row(row) }
+
+      def parse_tree(spec, ancestors)
+        raise ArgumentError, "cyclic preload tree" if ancestors.include?(spec.object_id)
+        ancestors = ancestors + [spec.object_id]
+        result = {}
+        spec.each do |item|
+          case item
+          when Symbol, String
+            key = item.to_sym
+            result[key] ||= {}.freeze
+          when Hash
+            raise ArgumentError, "cyclic preload tree" if ancestors.include?(item.object_id)
+            item.each do |key, value|
+              raise ArgumentError, "invalid association name" unless key.is_a?(Symbol) || key.is_a?(String)
+              children = value.is_a?(Array) ? value : [value]
+              result[key.to_sym] = merge_tree(result[key.to_sym] || {}, parse_tree(children, ancestors + [item.object_id]))
+            end
+          else
+            raise ArgumentError, "invalid preload specification"
+          end
+        end
+        result.freeze
+      end
+
+      def merge_tree(a, b)
+        a.merge(b) { |_key, left, right| merge_tree(left, right) }.freeze
+      end
+
+      def target_model(owner_model, association)
+        owner_model.allocate.send(:association_model, association)
+      end
+
+      def validate_tree(owner_model, tree)
+        tree.each do |name, children|
+          association = owner_model.respond_to?(:associations) && owner_model.associations[name]
+          raise ArgumentError, "#{owner_model} has no association #{name}" unless association
+          validate_tree(target_model(owner_model, association), children)
+        end
+      end
+
+      def preload(owners, tree, owner_model)
+        return if owners.empty?
+        tree.each do |name, children|
+          association = owner_model.associations.fetch(name)
+          target = target_model(owner_model, association)
+          query = context.match.send(:node_refs, :owner, owners.map(&:ref))
+          query = query.public_send(association.direction, association.edge_type, :n,
+                                    association.label || target.schema_type.name, edge: :e)
+          pairs = query.return(:owner, :n).distinct.to_a
+          targets = {}
+          grouped = Hash.new { |h, k| h[k] = [] }
+          pairs.each do |row|
+            element = row.fetch(:n)
+            record = targets[element.ref] ||= target.instantiate(context, element)
+            grouped[row.fetch(:owner).ref] << record
+          end
+          owners.each do |owner|
+            cache = owner.instance_variable_get(:@association_cache) || {}
+            cache[name] = grouped[owner.ref].freeze
+            owner.instance_variable_set(:@association_cache, cache)
+          end
+          preload(targets.values, children, target)
+        end
+      end
 
       def var = model.query_var
 
@@ -124,6 +203,7 @@ module Pglpg
       def derive(query, shaped: @shaped)
         copy = clone(freeze: false)
         copy.instance_variable_set(:@query, query)
+        copy.instance_variable_set(:@cached, nil) if copy.is_a?(AssociationRelation)
         copy.instance_variable_set(:@filtered, true)
         copy.instance_variable_set(:@shaped, shaped)
         copy.freeze
@@ -137,9 +217,33 @@ module Pglpg
     #   person.projects.rel_where(role: "lead").order(:title).limit(20)
     #   person.projects.with_rel.each { |project, works_on| ... }
     class AssociationRelation < Relation
-      def initialize(model, context, query, edge_model:)
+      def initialize(model, context, query, edge_model:, cached: nil)
         @edge_model = edge_model
+        @cached = cached
         super(model, context, query, filtered: true)
+      end
+
+      def to_a
+        return super unless @cached
+        preload(@cached, @preload, model) unless @preload.empty?
+        @cached
+      end
+
+      def first(n = nil)
+        return super unless @cached
+        return to_a.first if n.nil?
+
+        limit(n) # retain the relation’s argument and budget checks
+        to_a.first(n).freeze
+      end
+
+      def count = @cached ? @cached.size : super
+      def exists? = @cached ? !@cached.empty? : super
+      def pluck(*names)
+        return super unless @cached
+        names = pluck_names!(model, names)
+        raise ArgumentError, "pluck needs at least one name" if names.empty?
+        @cached.map { |record| unwrap(project(record, names)) }
       end
 
       # Structured conditions on the association's edge properties.
@@ -179,6 +283,8 @@ module Pglpg
     class BindingRelation < AssociationRelation
       # order(...) orders by target properties; rel_order(...) by edge ones.
       def rel_order(*names, **spec) = derive(order_query(:e, names, spec), shaped: true)
+
+      def with_associations(*) = raise(ArgumentError, "preloading binding relations is not supported")
 
       def with_rel = self
 

@@ -126,7 +126,7 @@ module Pglpg
                        .public_send(association.direction, association.edge_type, :n,
                                     association.label || target.schema_type.name, edge: :e)
         edge_model = Model.lookup(self.class.graph, :edge, association.edge_type)
-        AssociationRelation.new(target, context, query, edge_model:)
+        AssociationRelation.new(target, context, query, edge_model:, cached: (@association_cache || {})[association.name])
       end
 
       def association_model(association)

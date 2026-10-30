@@ -102,6 +102,16 @@ module Pglpg
         nil
       end
       out.merge(observe_associations(ctx, models))
+      eager = models[:Person].in(ctx).order(:uid).with_associations(:known, :known_by, friends: :friends, projects: :people)
+      out[:eager_associations] = eager.map do |owner|
+        [owner.uid, %i[known known_by friends projects].map do |name|
+          owner.public_send(name).map do |target|
+            children = name == :friends ? target.friends : (target.people if name == :projects)
+            [model_data(target), children&.map { model_data(_1) }]
+          end
+        end]
+      end
+      out
     end
 
     # Association target and binding queries from every visible owner.

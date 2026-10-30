@@ -17,7 +17,7 @@ module Pglpg
   class Query
     include Enumerable
 
-    NodePattern = Data.define(:var, :label, :ref_id)
+    NodePattern = Data.define(:var, :label, :ref_id, :ref_ids)
     EdgePattern = Data.define(:var, :type, :direction, :from_var, :to_var, :named)
     State = Data.define(:nodes, :edges, :conditions, :returns, :orders, :limit, :offset, :distinct, :last_var)
 
@@ -39,7 +39,7 @@ module Pglpg
       var = new_var!(var)
       label = check_label!(label)
       context.graph.check_ref!(ref, :node) if ref
-      q = with(nodes: { var => NodePattern.new(var:, label:, ref_id: ref&.id) }.freeze, last_var: var)
+      q = with(nodes: { var => NodePattern.new(var:, label:, ref_id: ref&.id, ref_ids: nil) }.freeze, last_var: var)
       props.empty? ? q : q.where(var => props)
     end
 
@@ -153,6 +153,14 @@ module Pglpg
 
     private
 
+    # Internal batched start, with the same ref checks as #node.
+    def node_refs(var, refs)
+      refs.each { context.graph.check_ref!(_1, :node) }
+      q = node(var)
+      pattern = q.instance_variable_get(:@state).nodes.fetch(var.to_sym)
+      q.send(:with, nodes: { var.to_sym => pattern.with(ref_ids: refs.map(&:id).freeze) }.freeze)
+    end
+
     def with(**changes) = Query.new(context, @state.with(**changes))
 
     def max_rows = Pglpg.configuration.max_rows
@@ -179,7 +187,7 @@ module Pglpg
         end
       else
         new_var!(var)
-        nodes = nodes.merge(var => NodePattern.new(var:, label:, ref_id: nil)).freeze
+        nodes = nodes.merge(var => NodePattern.new(var:, label:, ref_id: nil, ref_ids: nil)).freeze
       end
 
       # Checked against the node map including this hop's new node.
@@ -342,6 +350,11 @@ module Pglpg
       if node.ref_id
         sql << " AND " << n << ".id = "
         sql.bind(node.ref_id, "bigint")
+      end
+      if node.ref_ids
+        sql << " AND " << n << ".id = ANY("
+        sql.bind_text_array(node.ref_ids.map(&:to_s))
+        sql << "::bigint[])"
       end
       conditions_sql(sql, node.var, n)
     end

@@ -124,11 +124,17 @@ module Pglpg
           raise SchemaError, "#{schema_type.name} has properties named like columns: #{clashes.join(", ")}" if clashes.any?
 
           (property_names + column_names).each do |name|
+            if inherited_member_names.include?(name)
+              raise SchemaError, "#{schema_type.name}.#{name} clashes with the inherited association #{name}"
+            end
             next unless reserved_name?(name)
 
             raise SchemaError, "#{schema_type.name}.#{name} clashes with a method of #{base_class}"
           end
         end
+
+        # Names a model inherits that attributes may not take (associations).
+        def inherited_member_names = []
 
         # Methods of the model classes and ActiveModel, public or private, plus
         # the core Object methods an attribute must never shadow. Other

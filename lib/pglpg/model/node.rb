@@ -74,6 +74,8 @@ module Pglpg
 
         def own_associations = (@own_associations ||= {})
 
+        def inherited_member_names = associations.keys
+
         # The owner's possible labels and the target label for +direction+,
         # following the query DSL's rule for symmetric types (ADR-0008).
         def association_ends(edge_type, direction)
@@ -131,7 +133,7 @@ module Pglpg
         graph = self.class.graph
         model = case association.model
                 when nil then Model.lookup(graph, :node, association.label)
-                when String, Symbol then Object.const_get(association.model.to_s)
+                when String, Symbol then resolve_model_name(association.model.to_s)
                 else association.model
                 end
         unless model.is_a?(Class) && model < Model::Node && model.graph.equal?(graph)
@@ -143,6 +145,13 @@ module Pglpg
         end
 
         model
+      end
+
+      # nil for a name that doesn't resolve, so it reports as a missing model.
+      def resolve_model_name(name)
+        Object.const_get(name)
+      rescue NameError
+        nil
       end
 
       def load_identity(element)

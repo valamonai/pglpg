@@ -34,6 +34,20 @@ RSpec.describe "Pglpg::Model associations" do
       expect(b.associations.keys).to eq(%i[links])
     end
 
+    it "rejects a subtype property named like an inherited association" do
+      g = schema(:assoc_shadow) do
+        node(:A)
+        node(:B, extends: :A) { property :links, :string }
+        edge(:L, from: :A, to: :A)
+      end
+      a = Class.new(Pglpg::Model::Node) do
+        graph g, type: :A
+        has_many :links, :out, edge: :L
+      end
+      expect { Class.new(a) { graph g, type: :B } }
+        .to raise_error(Pglpg::SchemaError, /B.links clashes with the inherited association links/)
+    end
+
     it "checks direction, endpoints and names" do
       g = schema(:assoc_checks) do
         node(:P) { property :title, :string }
@@ -68,12 +82,14 @@ RSpec.describe "Pglpg::Model associations" do
         graph g, type: :P
         has_many :qs, :out, edge: :D
         has_many :ps, :out, edge: :D, model: "String"
+        has_many :missing, :out, edge: :D, model: "DoesNotExistReviewModel"
       end
       gctx = g.for(viewer: Viewer.new(4))
       record = p_model.in(gctx).create!(classification: 1)
 
       expect { record.qs }.to raise_error(Pglpg::ConfigurationError, /no node model of graph assoc_model for Q; give model:/)
       expect { record.ps }.to raise_error(Pglpg::ConfigurationError, /no node model/)
+      expect { record.missing }.to raise_error(Pglpg::ConfigurationError, /no node model/)
     end
   end
 

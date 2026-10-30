@@ -31,7 +31,8 @@ RSpec.shared_examples "a pglpg visibility policy" do
         property :uid, :string, required: true
         property :name, :string
         property :rank, :integer
-        key :uid
+        property :namespace, :string, required: true
+        key :uid, scope: :namespace
       end
       node :Project do
         property :uid, :string, required: true
@@ -66,7 +67,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
     seed = pglpg_seed_graph.for(viewer: nil).trusted_writer
     vis = pglpg_visible_attrs
     hid = pglpg_hidden_attrs
-    person = ->(uid, name, rank, attrs) { seed.insert_node(:Person, properties: { uid:, name:, rank: }, attrs:) }
+    person = ->(uid, name, rank, attrs) { seed.insert_node(:Person, properties: { uid:, name:, rank:, namespace: attrs == hid ? "hidden" : "visible" }, attrs:) }
     node = ->(type, uid, attrs, **props) { seed.insert_node(type, properties: { uid:, **props }, attrs:) }
     edge = ->(type, from, to, attrs, **props) { seed.insert_edge(type, from:, to:, properties: props, attrs:) }
 
@@ -130,7 +131,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
     before.each_key { |name| expect(after[name]).to eq(before[name]), "observation #{name} changed" }
 
     hidden_refs.each { |ref| expect(ctx.find(ref)).to be_nil, "#{ref} is visible" }
-    expect(ctx.find_node(:Person, uid: "H1")).to be_nil
+    expect(ctx.find_node(:Person, namespace: "hidden", uid: "H1")).to be_nil
 
     models = Pglpg::Testing.leak_models(pglpg_leak_graph)
     [h0, h1, h2].each do |ref|

@@ -8,6 +8,9 @@ module Pglpg
   #   target:    the Ref being changed (update and delete), else nil
   #   from, to:  endpoint Refs for edge inserts and upserts
   #   key:       the key for upserts
+  # Scope-wide occupancy permission, distinct from write or read access.
+  KeyScopeRequest = Data.define(:context, :domain, :scope)
+
   WriteRequest = Data.define(:viewer, :operation, :type, :target, :from, :to, :key, :properties, :attrs, :trusted)
 
   # Compiles writes into single statements. Visibility of the existing row,
@@ -28,7 +31,7 @@ module Pglpg
       props = properties.transform_keys(&:to_sym)
       if (key = node_type.key)
         if props.key?(key.property)
-          raise ArgumentError, "#{node_type.name}.#{key.property} is a key and is generated" unless @trusted
+          raise ArgumentError, "#{node_type.name}.#{key.property} is a key and is generated" unless @trusted || key.scope
         else
           props[key.property] = key.generate(node_type.name)
         end
@@ -36,6 +39,12 @@ module Pglpg
       json = node_type.encode_properties(props)
       cols = encode_attrs(@graph.type.node_columns, attrs, insert: true)
       authorize!(:insert_node, node_type.name, properties: props, attrs:)
+      if key&.scope && !@trusted && properties.keys.map(&:to_sym).include?(key.property)
+        scope = { key.scope => props.fetch(key.scope).dup.freeze }.freeze
+        request = KeyScopeRequest.new(context:, domain: key.declared_on, scope:)
+        allowed = @graph.key_scope_allowed
+        raise WriteRejected unless allowed.respond_to?(:call) && allowed.call(request) == true
+      end
 
       sql = new_sql
       insert_node_values(sql, node_type, json, cols)
@@ -48,7 +57,7 @@ module Pglpg
       node = @context.find(ref) or raise WriteRejected
       node_type = @graph.type.node_type!(node.key_label)
       props = properties.transform_keys(&:to_sym)
-      raise ArgumentError, "keys cannot be changed" if node_type.key && props.key?(node_type.key.property)
+      raise ArgumentError, "keys cannot be changed" if node_type.key && (props.keys & node_type.key.properties).any?
 
       json = node_type.encode_properties(props, partial: true)
       cols = encode_attrs(@graph.type.node_columns, attrs, insert: false)
@@ -72,10 +81,10 @@ module Pglpg
       node_type = concrete_node_type!(type)
       node_key = node_type.key or raise ArgumentError, "#{node_type.name} has no key"
       key = key.transform_keys(&:to_sym)
-      raise ArgumentError, "#{node_type.name} is upserted by #{node_key.property.inspect}" unless key.keys == [node_key.property]
+      raise ArgumentError, "#{node_type.name} is upserted by #{node_key.properties.inspect}" unless key.keys.sort == node_key.properties.sort
 
       props = properties.transform_keys(&:to_sym)
-      raise ArgumentError, "pass the key in key:, not properties:" if props.key?(node_key.property)
+      raise ArgumentError, "pass the key in key:, not properties:" if (props.keys & node_key.properties).any?
 
       props = props.merge(key)
       json = node_type.encode_properties(props)
@@ -84,8 +93,13 @@ module Pglpg
 
       sql = new_sql
       insert_node_values(sql, node_type, json, cols)
-      sql << " ON CONFLICT ((properties->>"
-      sql.literal(node_key.property) << ")) WHERE labels @> ARRAY["
+      sql << " ON CONFLICT ("
+      node_key.properties.each_with_index do |property, i|
+        sql << ", " if i.positive?
+        sql << "(properties->>"
+        sql.literal(property) << ")"
+      end
+      sql << ") WHERE labels @> ARRAY["
       sql.literal(node_key.declared_on) << "]::text[] DO UPDATE SET "
       set_properties(sql, "tgt.properties", json, null_keys(props), excluded: true)
       set_columns(sql, cols, excluded: true)
@@ -333,7 +347,7 @@ module Pglpg
       id.to_i
     rescue ActiveRecord::StatementInvalid => e
       case e.cause
-      when PG::UniqueViolation, PG::ForeignKeyViolation, PG::RestrictViolation then raise WriteRejected
+      when PG::UniqueViolation, PG::ForeignKeyViolation, PG::RestrictViolation then raise WriteRejected, cause: nil
       when PG::NotNullViolation, PG::CheckViolation then raise ValidationError, e.message
       else raise
       end

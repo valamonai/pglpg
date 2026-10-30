@@ -81,8 +81,9 @@ module Pglpg
       type.node_types.each_value do |t|
         has_label = "labels @> ARRAY[#{connection.quote(t.name.to_s)}]::text[]"
         if (key = t.own_key)
+          expressions = key.properties.map { "(properties->>#{connection.quote(_1.to_s)})" }.join(", ")
           list << [:index, nodes_table, "key_#{t.name}_#{key.property}",
-                   "ON #{n} ((properties->>#{connection.quote(key.property.to_s)})) WHERE #{has_label}"]
+                   "ON #{n} (#{expressions}) WHERE #{has_label}"]
         end
         t.own_properties.each_value.select(&:required?).each do |p|
           list << [:check, nodes_table, "req_#{t.name}_#{p.name}", "NOT (#{has_label}) OR #{typed_check(connection, p)}"]

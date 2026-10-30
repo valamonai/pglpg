@@ -2,7 +2,7 @@
 
 module Pglpg
   # Global settings. Each graph can override visibility, write_policy and
-  # trusted_writer_allowed when it is defined.
+  # trusted_writer_allowed and key_scope_allowed when it is defined.
   class Configuration
     # Required. An object with +node(table, viewer)+ and +edge(table, viewer)+,
     # each returning an Arel condition on the given Arel::Table.
@@ -15,6 +15,9 @@ module Pglpg
     # A callable +->(context) { ... }+ returning true when the trusted writer
     # may be used for that context. Unset means the capability is never granted.
     attr_accessor :trusted_writer_allowed
+
+    # Explicit permission to learn key occupancy in a scoped key domain.
+    attr_accessor :key_scope_allowed
 
     # The ActiveRecord class whose connection pglpg uses.
     attr_accessor :connection_class

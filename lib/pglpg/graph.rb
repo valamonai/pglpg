@@ -18,15 +18,15 @@ module Pglpg
     attr_reader :name, :type, :storage
 
     def self.define(name, nodes_table: nil, edges_table: nil, visibility: nil, write_policy: nil,
-                    trusted_writer_allowed: nil, connection_class: nil, &block)
+                    trusted_writer_allowed: nil, key_scope_allowed: nil, connection_class: nil, &block)
       type = Schema::GraphType.new
       Schema::Builder.new(type).instance_eval(&block) if block
       type.resolve!
       new(name, type, nodes_table: nodes_table || "#{name}_nodes", edges_table: edges_table || "#{name}_edges",
-                      visibility:, write_policy:, trusted_writer_allowed:, connection_class:)
+                      visibility:, write_policy:, trusted_writer_allowed:, key_scope_allowed:, connection_class:)
     end
 
-    def initialize(name, type, nodes_table:, edges_table:, visibility:, write_policy:, trusted_writer_allowed:,
+    def initialize(name, type, nodes_table:, edges_table:, visibility:, write_policy:, trusted_writer_allowed:, key_scope_allowed:,
                    connection_class:)
       @name = Schema.check_name!(name, "graph")
       @type = type
@@ -34,6 +34,7 @@ module Pglpg
       @visibility = visibility
       @write_policy = write_policy
       @trusted_writer_allowed = trusted_writer_allowed
+      @key_scope_allowed = key_scope_allowed
       @connection_class = connection_class
       freeze
     end
@@ -76,6 +77,8 @@ module Pglpg
     end
 
     def trusted_writer_allowed = @trusted_writer_allowed || Pglpg.configuration.trusted_writer_allowed
+
+    def key_scope_allowed = @key_scope_allowed.nil? ? Pglpg.configuration.key_scope_allowed : @key_scope_allowed
 
     def connection_class = @connection_class || Pglpg.configuration.connection_class || ActiveRecord::Base
 

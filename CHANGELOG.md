@@ -1,17 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-30)
 
-- Storage DDL is atomic: `sync_constraints!` and the entire `create!` operation
-  use a transaction on their supplied connection, or a savepoint in an existing
-  ActiveRecord transaction. A failed call restores its DDL and leaves a healthy
-  caller transaction usable. Outside a transaction, each call commits its own
-  transaction. Application backfills still need an explicit outer transaction
-  on the same connection to be rolled back with a failed schema transition.
+### Breaking
 
-- Write refusals caused by unique, foreign-key or restrict violations no longer
-  expose the underlying database constraint error through `Exception#cause`.
-  This applies to all writes, including unscoped keys and edges.
+- Symmetric edge types use `both`; `out` and `in` reject them, and `both`
+  rejects directed types. After adding a symmetric type, run
+  `Kg.storage.sync_constraints!` to install its canonical-endpoint constraint.
+- Adopting scoped keys requires a required string scope property, both scope
+  and key in lookups and trusted upserts, and a transactional backfill with
+  `sync_constraints!` on the same connection. Interactive caller-chosen scoped
+  keys require an explicit `key_scope_allowed` occupancy grant. Existing
+  unscoped key declarations keep their contract.
+
+### Security
+
+- Database constraint failures on refused writes no longer expose the original
+  database exception through `Exception#cause`, including unscoped writes.
+
+### Added
 
 - Scoped keys (ADR-0012): `key :uid, scope: :namespace` enforces a required
   string namespace/key pair across the declaring type and subtypes. Interactive
@@ -139,6 +146,16 @@
     nodes stored at either end of an edge.
 - The benchmark adds symmetric 1- and 2-hop shapes and checks the buffers of
   the symmetric hub query.
+
+### Fixed
+
+- Storage DDL is atomic: `sync_constraints!` and the entire `create!` operation
+  use a transaction on their supplied connection, or a savepoint in an existing
+  ActiveRecord transaction. A failed call restores its DDL and leaves a healthy
+  caller transaction usable. Outside a transaction, each call commits its own
+  transaction. Application backfills still need an explicit outer transaction
+  on the same connection to be rolled back with a failed schema transition.
+
 
 ## 0.1.0 (2026-10-28)
 

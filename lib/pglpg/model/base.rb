@@ -4,16 +4,37 @@ module Pglpg
   module Model
     # Shared by Model::Node and Model::Edge. A model class binds a graph and
     # a schema type; its attributes are the type's properties and the
-    # graph's application columns. Loaded models keep the Context they were
-    # read through.
+    # graph's application columns. Models keep the Context they were read
+    # or built through, and write through its guarded write API (ADR-0010).
     class Base
       include ActiveModel::API
       include ActiveModel::Attributes
+      include ActiveModel::Dirty
 
       # Attributes are assigned as given: no form coercion ("42" stays a
-      # String). The schema checks values when they are written.
+      # String). The schema checks values on validation.
+      #
+      # Every conversion copies Strings and Arrays, so the dirty baseline and
+      # the caller's object never share the record's value, and in-place
+      # edits (tags << "b", name << "e") count as changes.
       class StrictType < ActiveModel::Type::Value
-        def cast(value) = value
+        def cast(value) = copy(value)
+
+        def deserialize(value) = copy(value)
+
+        def serialize(value) = copy(value)
+
+        def changed_in_place?(raw_old_value, new_value) = raw_old_value != new_value
+
+        private
+
+        def copy(value)
+          case value
+          when Array then value.map { copy(_1) }
+          when String then value.dup
+          else value
+          end
+        end
       end
 
       STRICT = StrictType.new
@@ -23,6 +44,8 @@ module Pglpg
         class hash freeze frozen? send public_send object_id method methods respond_to? dup clone
         equal? eql? is_a? kind_of? instance_of? nil? itself instance_variable_get instance_variable_set
       ].freeze
+
+      validate :validate_schema
 
       class << self
         # Binds the model to a graph and a schema type:
@@ -60,6 +83,14 @@ module Pglpg
           Relation.new(self, context)
         end
 
+        # Anonymous model classes are named after their schema type, so
+        # validation messages work for them too.
+        def model_name
+          return super if name
+
+          @model_name ||= ActiveModel::Name.new(self, nil, schema_type&.name&.to_s || base_class.name.split("::").last)
+        end
+
         # -- internal ----------------------------------------------------------
 
         # A model of +element+, read through +context+: the model registered
@@ -67,6 +98,11 @@ module Pglpg
         def instantiate(context, element)
           klass = Model.lookup(graph, kind, element_type_name(element)) || self
           klass.allocate.tap { _1.send(:load_element, context, element) }
+        end
+
+        # A new record bound to +context+.
+        def build(context, attributes)
+          new(attributes).tap { _1.instance_variable_set(:@context, context) }
         end
 
         private
@@ -115,14 +151,62 @@ module Pglpg
 
       def id = ref&.id
 
-      def persisted? = !ref.nil?
+      def persisted? = !ref.nil? && !destroyed?
 
       def new_record? = ref.nil?
+
+      def destroyed? = @destroyed == true
 
       def to_key = persisted? ? [id] : nil
 
       # The ref as a String; Relation#find accepts it back.
       def to_param = ref&.to_s
+
+      # Validates, then writes through the context's guarded write API: an
+      # insert for a new record, else an update of the changed attributes
+      # only. Returns false when validation fails. Refusals (WriteRejected,
+      # NotTrusted), timeouts and database errors raise; changes are kept on
+      # any failure. +writer:+ hands over the context's trusted writer, for
+      # trusted-only operations; it never permits assigning a key.
+      #
+      # Success means the statement succeeded in the caller's transaction.
+      # Local state is what was assigned, not a stored snapshot (generated
+      # keys and timestamps are unknown until #reload), and a caller's
+      # rollback is not tracked: discard or reload the record after one.
+      def save(writer: nil)
+        target = write_target(writer)
+        return false unless valid?
+
+        persist(target)
+      end
+
+      # As #save, but raises RecordInvalid when validation fails.
+      def save!(writer: nil)
+        target = write_target(writer)
+        raise RecordInvalid, self unless valid?
+
+        persist(target)
+      end
+
+      # Deletes the element through the guarded write API (a node only
+      # through the trusted writer). Returns true.
+      def destroy(writer: nil)
+        raise ArgumentError, "only a persisted record can be destroyed" unless persisted?
+
+        delete_element(write_target(writer))
+        @destroyed = true
+      end
+
+      # Replaces attributes, timestamps and the dirty baseline from the
+      # stored element. Raises RecordNotFound, leaving the record unchanged,
+      # when it is missing or no longer visible.
+      def reload
+        element = ref && context&.find(ref)
+        raise RecordNotFound unless element && self.class.matches?(element)
+
+        load_element(context, element)
+        self
+      end
 
       def ==(other) = other.is_a?(self.class.base_class) && !ref.nil? && other.ref == ref
 
@@ -137,6 +221,10 @@ module Pglpg
 
       private
 
+      # ActiveModel casts lazily, on first read; copy on assignment so a
+      # caller who changes the object afterwards doesn't change the record.
+      def _write_attribute(name, value) = super(name, STRICT.cast(value))
+
       def load_element(context, element)
         @attributes = self.class._default_attributes.deep_dup
         @context = context
@@ -148,6 +236,82 @@ module Pglpg
         self.class.column_names.each { @attributes.write_from_database(_1.to_s, element.attrs[_1]) }
         @extra_properties = properties.except(*self.class.property_names).freeze
         load_identity(element)
+        clear_changes_information
+        self
+      end
+
+      # The context's interactive writes, or the given writer, which must
+      # belong to this record's own context (identity).
+      def write_target(writer)
+        raise ArgumentError, "#{self.class} has no context; build it with Model.in(ctx).new" unless context
+        raise ArgumentError, "#{self.class} was destroyed" if destroyed?
+        return context if writer.nil?
+        raise ArgumentError, "writer: expects a Pglpg::Writer" unless writer.is_a?(Pglpg::Writer)
+        raise ArgumentError, "the writer belongs to another context" unless writer.context.equal?(context)
+
+        writer
+      end
+
+      def persist(target)
+        if new_record?
+          create_element(target, assigned(self.class.property_names), assigned(self.class.column_names))
+        elsif changed?
+          update_element(target, changes_to(self.class.property_names), changes_to(self.class.column_names))
+        end
+        changes_applied
+        true
+      end
+
+      # Non-nil values to insert (nil means absent).
+      def assigned(names)
+        names.each_with_object({}) do |name, out|
+          value = attribute(name.to_s)
+          out[name] = value unless value.nil?
+        end
+      end
+
+      # Changed values to update (nil removes a property).
+      def changes_to(names) = names.select { attribute_changed?(_1.to_s) }.to_h { [_1, attribute(_1.to_s)] }
+
+      def element_columns = self.class.send(:element_columns, self.class.graph)
+
+      # Schema checks: property values per the stored type, required
+      # properties and columns.
+      def validate_schema
+        type = schema_type
+        self.class.property_names.each do |name|
+          prop = type.property_named(name)
+          value = attribute(name.to_s)
+          if value.nil?
+            errors.add(name, :blank) if prop.required? && required_now?(name)
+          else
+            begin
+              prop.encode(value)
+            rescue ValidationError
+              errors.add(name, :invalid, message: "is not a valid #{prop.type == :list ? "list of #{prop.of}" : prop.type}")
+            end
+          end
+        end
+        element_columns.each_value do |column|
+          next unless attribute(column.name.to_s).nil?
+
+          blank = new_record? ? column.required? : attribute_changed?(column.name.to_s) && !column.null?
+          errors.add(column.name, :blank) if blank
+        end
+      end
+
+      # A missing required property is an error on insert, and when an
+      # update would remove it.
+      def required_now?(name) = new_record? || attribute_changed?(name.to_s)
+    end
+
+    # save! or create! found validation errors. #record has them.
+    class RecordInvalid < Error
+      attr_reader :record
+
+      def initialize(record)
+        @record = record
+        super("validation failed: #{record.errors.full_messages.join(", ")}")
       end
     end
   end

@@ -22,6 +22,29 @@
     queried model; `schema_type` names the stored type and
     `extra_properties` holds properties the model doesn't declare.
   - The shared leak suite observes models, relations and `find`.
+- Model layer, writes (ADR-0010):
+  - `Relation#new` / `#build`, `#create` and `#create!` build records bound
+    to the relation's context. Edge records take `source:` and `target:` (a
+    node Ref or model); they can't change once stored.
+  - `save` / `save!` validate, then insert a new record or update only its
+    changed attributes through the context's guarded write API. `save`
+    returns false on validation errors; `save!` raises
+    `Pglpg::Model::RecordInvalid`. Refusals, timeouts and database errors
+    raise, and changes survive any failure. Without changes, no statement
+    runs.
+  - Schema validations: property values, required properties and required
+    columns. Keys are generated: an assigned key is an error on create, a
+    changed key on update. Abstract types can't be created.
+  - `save(writer:)` and `destroy(writer:)` accept only the record's own
+    context's trusted writer (`ArgumentError` otherwise), for trusted-only
+    writes such as pair-unique edges; it never permits assigning a key.
+  - `destroy` deletes an edge, or a node through the trusted writer only;
+    `destroyed?`.
+  - `reload` replaces attributes, timestamps and the dirty baseline, and
+    raises `RecordNotFound` without changing the record when the element
+    is missing or hidden.
+  - After a create, generated keys and timestamps are unknown until
+    `reload`. A caller's rollback is not tracked.
 - `Context#reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)`
   returns a `Pglpg::Reachability`: visible nodes with their minimum depth,
   ordered by depth then id, plus `complete` and `stopped_at_depth`.

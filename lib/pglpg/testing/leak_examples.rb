@@ -129,5 +129,11 @@ RSpec.shared_examples "a pglpg visibility policy" do
 
     hidden_refs.each { |ref| expect(ctx.find(ref)).to be_nil, "#{ref} is visible" }
     expect(ctx.find_node(:Person, uid: "H1")).to be_nil
+
+    models = Pglpg::Testing.leak_models(pglpg_leak_graph)
+    [h0, h1, h2].each do |ref|
+      expect { models[:Person].in(ctx).find(ref) }.to raise_error(Pglpg::Model::RecordNotFound), "#{ref} is visible"
+    end
+    expect { models[:Project].in(ctx).find(hj) }.to raise_error(Pglpg::Model::RecordNotFound), "#{hj} is visible"
   end
 end

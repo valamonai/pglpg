@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Model layer, reads (ADR-0010; `require "pglpg/model"`):
+  - `Pglpg::Model::Node` and `Pglpg::Model::Edge` are ActiveModel classes
+    bound to a graph and a schema type with `graph Kg, type: :Person`. Their
+    attributes are the type's properties and the graph's application
+    columns. Assignment is strict: no form coercion.
+  - Declaring a model rejects a second model for the same type (a class of
+    the same name replaces it, for code reloading), a property named like an
+    application column or a model method, and a model extending another
+    model off the schema's inheritance.
+  - `Model.in(ctx)` returns a `Pglpg::Model::Relation` with `where`, `order`,
+    `limit`, `offset`, `count`, `exists?`, `first` and `find_by`. It compiles
+    to a `Pglpg::Query`, so visibility, ordering, `max_rows` and timeouts
+    apply as there. Edge relations return each symmetric edge once.
+  - `Relation#find(ref)` takes a `Ref` or its String form and raises
+    `Pglpg::Model::RecordNotFound` for a missing, hidden or wrong-type
+    element alike.
+  - A node loads as the model registered for its concrete type, else as the
+    queried model; `schema_type` names the stored type and
+    `extra_properties` holds properties the model doesn't declare.
+  - The shared leak suite observes models, relations and `find`.
 - `Context#reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)`
   returns a `Pglpg::Reachability`: visible nodes with their minimum depth,
   ordered by depth then id, plus `complete` and `stopped_at_depth`.

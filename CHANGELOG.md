@@ -64,6 +64,17 @@
     applies) and can't build records yet.
   - The shared leak suite observes every association of every visible owner:
     targets, counts, `exists?`, `first`, pagination, `rel_where` and pairs.
+- Model layer, `pluck` (ADR-0010 §5):
+  - `Relation#pluck(*names)` returns attribute values (or `:id`, `:ref`) per
+    element, in the relation's order: a value for one name, an Array for
+    several. Elements are chosen first and projected afterwards, so two
+    targets with equal values give two values.
+  - `BindingRelation#pluck(*names, rel: [])` gives one entry per pair:
+    the target's names, then the edge's `rel` names.
+  - Unknown names raise `ArgumentError` before any query runs; `max_rows`
+    applies as for `to_a`.
+  - The shared leak suite also observes `pluck` on relations, associations
+    and pairs.
 - `Context#reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)`
   returns a `Pglpg::Reachability`: visible nodes with their minimum depth,
   ordered by depth then id, plus `complete` and `stopped_at_depth`.

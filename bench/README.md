@@ -160,7 +160,8 @@ driver refuses to run if any pglpg file is loaded from elsewhere.
     after reviewing a run, to accept a new one.
   - **10m** doesn't run on pull requests. Scheduled runs gate it on absolute
     bounds only. A manual run with `compare_10m` compares it too, with
-    `--require-baseline`. That comparison is required once to finish task
+    `--require-baseline` on every compared fixture (1m, hub-heavy and 10m).
+    That comparison is required once to finish task
     36367, and again for the release candidate before 0.2 (release gate
     36368).
 

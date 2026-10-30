@@ -8,9 +8,21 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.1, pre-release.** The design and its decisions live in the
+Status: **0.2.0 release candidate.** Publication awaits the
+[release gate](https://knowen.md/nodes/36368) and maintainer review. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
+
+## Install
+
+After publication:
+
+```ruby
+gem "pglpg", "~> 0.2.0"
+```
+
+Before 1.0, minor releases may break compatibility. Read the
+[0.2.0 upgrade notes](CHANGELOG.md) before upgrading from 0.1.
 
 ## Define a graph
 
@@ -157,6 +169,25 @@ The traversal is one SQL statement (ADR-0009), so it sees one snapshot at any
 isolation level. `deadline` is in seconds and can only shorten the configured
 `statement_timeout`; with no timeout configured it applies alone. Running out
 of time raises `Pglpg::QueryTimeout` and leaves your transaction usable.
+
+## Models and eager loading
+
+`require "pglpg/model"` adds optional ActiveModel records bound to a graph and
+schema type. Context-bound relations support reads, guarded saves, associations,
+`pluck` and visibility-aware batched eager loading with `with_associations`.
+See the [API contract](https://knowen.md/nodes/36329) for examples, cache lifetime
+and row limits.
+
+## Scoped keys
+
+A type can declare `key :uid, scope: :namespace` when both properties are
+required strings. Uniqueness covers the scope/key pair across the type and its
+subtypes. `find_node` and trusted upserts require both values. An interactive
+caller-chosen key needs an explicit `key_scope_allowed` grant: it permits
+learning occupancy in that scope, including hidden collisions, without granting
+row access. Scope and key are immutable. Existing data needs a transactional
+backfill and constraint migration; see the
+[API contract](https://knowen.md/nodes/36329).
 
 ## Leak specs for your policy
 

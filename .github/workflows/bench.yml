@@ -8,7 +8,8 @@ name: Benchmark
 # scheduled or manual run, the `baseline` input or else bench/BASELINE (the
 # last accepted baseline). Scheduled runs gate 10m on absolute bounds only;
 # a manual run with compare_10m compares it too, and then every 10m cell
-# needs a baseline measurement.
+# needs a baseline measurement. Manual full comparisons require a baseline
+# for every cell on all three fixtures.
 on:
   pull_request:
     paths: [lib/**, bench/**, .github/workflows/bench.yml, Gemfile, pglpg.gemspec]
@@ -20,7 +21,7 @@ on:
         description: Baseline commit SHA (default bench/BASELINE)
         required: false
       compare_10m:
-        description: Compare the 10m fixture with the baseline too
+        description: Compare all fixtures strictly, including 10m
         type: boolean
         default: false
 
@@ -99,10 +100,11 @@ jobs:
       - name: Gate
         env:
           COMPARE: ${{ steps.baseline.outputs.compare }}
+          STRICT_BASELINE: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_10m }}
         run: |
           args=(--candidate tmp/bench/candidate)
           if [ "$COMPARE" = true ]; then args+=(--baseline tmp/bench/baseline); fi
-          if [ "$COMPARE" = true ] && [ "$FIXTURE" = 10m ]; then args+=(--require-baseline); fi
+          if [ "$COMPARE" = true ] && { [ "$FIXTURE" = 10m ] || [ "$STRICT_BASELINE" = true ]; }; then args+=(--require-baseline); fi
           bundle exec ruby bench/gate.rb "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Job time
         if: always()

@@ -92,6 +92,7 @@ module Pglpg
         out[:"model_#{name}_count"] = r.().count
         out[:"model_#{name}_exists"] = r.().exists?
         out[:"model_#{name}_first"] = model_data(r.().first)
+        out[:"model_#{name}_pluck"] = r.().pluck(:id, *r.().model.attribute_names)
       end
       out[:model_find_by] = %w[P1 P2 P3 H1].map { model_data(models[:Person].in(ctx).find_by(uid: _1)) }
       out[:model_find] = refs.map do |ref|
@@ -118,7 +119,9 @@ module Pglpg
             page: targets.().limit(1).offset(1).map { model_data(_1) },
             pairs: targets.().with_rel.map(&pair),
             pairs_count: targets.().with_rel.count,
-            pairs_page: targets.().with_rel.limit(1).offset(1).map(&pair)
+            pairs_page: targets.().with_rel.limit(1).offset(1).map(&pair),
+            pluck: targets.().pluck(:id, *targets.().model.attribute_names),
+            pairs_pluck: targets.().with_rel.pluck(:id, rel: [:id, *models.fetch(owner.class.associations[name].edge_type).attribute_names])
           }]
         end
         data[:leads] = owner.projects.rel_where(role: "lead").map { model_data(_1) } if owner.respond_to?(:projects)

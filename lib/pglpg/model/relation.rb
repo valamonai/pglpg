@@ -61,6 +61,19 @@ module Pglpg
       # The first element matching +props+, or nil.
       def find_by(**props) = where(**props).first
 
+      # The values of attributes (or :id, :ref) of each element, in order:
+      # one value per element for one name, an Array per element for
+      # several. Elements are chosen first and projected afterwards, so two
+      # elements with equal values give two values (ADR-0010 §5).
+      #   people.order(:name).pluck(:name)        # => ["Ann", "Bob"]
+      #   people.pluck(:id, :name)                # => [[1, "Ann"], [2, "Bob"]]
+      def pluck(*names)
+        names = pluck_names!(model, names)
+        raise ArgumentError, "pluck needs at least one name" if names.empty?
+
+        to_a.map { |record| unwrap(project(record, names)) }
+      end
+
       # A new record bound to the relation's context.
       def new(**attributes) = model.build(context, attributes)
 
@@ -86,6 +99,21 @@ module Pglpg
       def compiled = @query
 
       def load_row(row) = model.instantiate(context, row.fetch(var))
+
+      PLUCK_IDENTITY = %i[id ref].freeze
+
+      # Checked before any query runs.
+      def pluck_names!(model, names)
+        names.map(&:to_sym).each do |name|
+          next if PLUCK_IDENTITY.include?(name) || model.attribute_names.include?(name.to_s)
+
+          raise ArgumentError, "#{model.name || model.schema_type.name} has no attribute #{name.inspect} to pluck"
+        end
+      end
+
+      def project(record, names) = names.map { record.public_send(_1) }
+
+      def unwrap(values) = values.size == 1 ? values.first : values
 
       def order_query(var, names, spec)
         q = names.reduce(@query) { |acc, name| acc.order(var => name) }
@@ -153,6 +181,20 @@ module Pglpg
       def rel_order(*names, **spec) = derive(order_query(:e, names, spec), shaped: true)
 
       def with_rel = self
+
+      # One entry per pair: the target's +names+, then the edge's +rel+ names.
+      #   ann.projects.with_rel.pluck(:title, rel: :role)  # => [["Apollo", "lead"], ...]
+      def pluck(*names, rel: [])
+        rel = Array(rel)
+        names = pluck_names!(model, names)
+        if rel.any?
+          @edge_model or raise ConfigurationError, "no model is registered for the association's edge type"
+          rel = pluck_names!(@edge_model, rel)
+        end
+        raise ArgumentError, "pluck needs at least one name" if names.empty? && rel.empty?
+
+        to_a.map { |target, edge| unwrap(project(target, names) + project(edge, rel)) }
+      end
 
       def each_with_rel(&) = each(&)
 

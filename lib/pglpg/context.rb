@@ -40,6 +40,7 @@ module Pglpg
     # The visible node of +type+ (or a subtype) with the given key, or nil.
     #   ctx.find_node(:Person, uid: "PER-12")
     def find_node(type, **key)
+      key = key.transform_keys(&:to_sym)
       node_type = graph.type.node_type!(type)
       unless node_type.key && key.keys.sort == node_type.key.properties.sort
         raise ArgumentError, "#{type} is looked up by #{node_type.key&.properties.inspect}"

@@ -173,7 +173,6 @@ RSpec.describe "scoped keys" do
     graph.storage.drop!
   end
 
-
   it "rolls back a failed constraint transition and supports a backfilled upgrade" do
     old = Pglpg::Graph.define(:scope_upgrade) do
       column :classification, :integer, default: 1
@@ -185,7 +184,8 @@ RSpec.describe "scoped keys" do
     end
     old.storage.create!
     viewer = old.for(viewer: Viewer.new(2))
-    viewer.insert_node(:P)
+    original_ref = viewer.insert_node(:P)
+    original_uid = viewer.find(original_ref).properties[:uid]
     upgraded = Pglpg::Graph.define(:scope_upgrade) do
       column :classification, :integer, default: 1
       node :P do
@@ -196,6 +196,8 @@ RSpec.describe "scoped keys" do
     end
     connection = old.connection
     old_indexes = connection.indexes(old.nodes_table).map(&:name).sort
+    old_key_indexes = connection.indexes(old.nodes_table).select(&:unique).map(&:name)
+    expect(old_key_indexes.size).to eq(1)
     expect do
       connection.transaction(requires_new: true) { upgraded.storage.sync_constraints! }
     end.to raise_error(ActiveRecord::StatementInvalid)
@@ -204,9 +206,13 @@ RSpec.describe "scoped keys" do
       connection.execute("UPDATE scope_upgrade_nodes SET properties = properties || '{\"namespace\":\"team\"}'::jsonb")
       upgraded.storage.sync_constraints!
     end
-    expect(upgraded.for(viewer: Viewer.new(2)).find_node(:P, namespace: "team", uid: viewer.match.node(:p, :P).first[:p].properties[:uid])).not_to be_nil
+    scoped = upgraded.for(viewer: Viewer.new(2))
+    expect(scoped.find_node(:P, namespace: "team", uid: original_uid).ref).to eq(original_ref)
+    expect(connection.indexes(old.nodes_table).map(&:name) & old_key_indexes).to be_empty
+    Pglpg.configuration.key_scope_allowed = ->(_) { true }
+    expect { scoped.insert_node(:P, properties: { namespace: "team", uid: original_uid }) }.to raise_error(Pglpg::WriteRejected)
+    expect(scoped.insert_node(:P, properties: { namespace: "other", uid: original_uid })).to be_a(Pglpg::Ref)
   end
-
 
   it "isolates grants by graph, declaring domain and scope" do
     Pglpg.configuration.key_scope_allowed = ->(request) do
@@ -231,4 +237,29 @@ RSpec.describe "scoped keys" do
     expect(calls).to be_empty
   end
 
+  it "normalizes string and mixed keys on lookup" do
+    Pglpg.configuration.key_scope_allowed = ->(_) { true }
+    ref = insert
+    expect(context.find_node(:Person, **{ "namespace" => "team", "uid" => "P-1" }).ref).to eq(ref)
+    expect(context.find_node(:Person, **{ namespace: "team", "uid" => "P-1" }).ref).to eq(ref)
+  end
+
+  it "allows a child key to scope by a required property inherited from its parent" do
+    g = Pglpg::Graph.define(:inherited_scope) do
+      column :classification, :integer, default: 1
+      node :Parent do
+        property :namespace, :string, required: true
+      end
+      node :Child, extends: :Parent do
+        property :uid, :string, required: true
+        key :uid, scope: :namespace
+      end
+    end
+    g.storage.create!
+    c = g.for(viewer: Viewer.new(2))
+    Pglpg.configuration.key_scope_allowed = ->(_) { true }
+    c.insert_node(:Child, properties: props)
+    expect { c.insert_node(:Child, properties: props) }.to raise_error(Pglpg::WriteRejected)
+    expect { c.insert_node(:Child, properties: { uid: "P-2" }) }.to raise_error(Pglpg::ValidationError)
+  end
 end

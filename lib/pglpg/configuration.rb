@@ -2,7 +2,7 @@
 
 module Pglpg
   # Global settings. Each graph can override visibility, write_policy and
-  # trusted_writer_allowed when it is defined.
+  # trusted_writer_allowed and key_scope_allowed when it is defined.
   class Configuration
     # Required. An object with +node(table, viewer)+ and +edge(table, viewer)+,
     # each returning an Arel condition on the given Arel::Table.

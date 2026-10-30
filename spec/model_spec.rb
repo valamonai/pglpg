@@ -89,6 +89,20 @@ RSpec.describe Pglpg::Model do
       end
     end
 
+    it "rejects properties that clash with private model methods" do
+      %i[load_element load_identity attribute].each do |name|
+        g = schema(:"private_#{name}") { node(:Thing) { property name, :string } }
+        expect { Class.new(Pglpg::Model::Node) { graph g, type: :Thing } }
+          .to raise_error(Pglpg::SchemaError, /Thing.#{name} clashes with a method/)
+      end
+      g = schema(:private_edge) do
+        node(:Thing)
+        edge(:LINK, from: :Thing, to: :Thing) { property :load_identity, :string }
+      end
+      expect { Class.new(Pglpg::Model::Edge) { graph g, type: :LINK } }
+        .to raise_error(Pglpg::SchemaError, /LINK.load_identity clashes with a method/)
+    end
+
     it "allows properties named like private Kernel methods" do
       g = schema { node(:Thing) { property :format, :string } }
       model = Class.new(Pglpg::Model::Node) { graph g, type: :Thing }
@@ -104,6 +118,18 @@ RSpec.describe Pglpg::Model do
       base = Class.new(Pglpg::Model::Node) { graph g, type: :Base }
       expect(Class.new(base) { graph g, type: :Sub }.attribute_names).to eq(%w[uid])
       expect { Class.new(base) { graph g, type: :Other } }.to raise_error(Pglpg::SchemaError, /cannot extend/)
+    end
+
+    it "checks inheritance against the nearest bound ancestor model" do
+      g = schema(:model_chain) do
+        node(:Base) { property :uid, :string }
+        node(:Sub, extends: :Base)
+        node(:Other) { property :title, :string }
+      end
+      base = Class.new(Pglpg::Model::Node) { graph g, type: :Base }
+      intermediate = Class.new(base)
+      expect { Class.new(intermediate) { graph g, type: :Other } }.to raise_error(Pglpg::SchemaError, /cannot extend/)
+      expect(Class.new(intermediate) { graph g, type: :Sub }.attribute_names).to eq(%w[uid])
     end
   end
 

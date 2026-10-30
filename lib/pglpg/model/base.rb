@@ -71,10 +71,13 @@ module Pglpg
 
         private
 
-        # A model may extend another model only along the schema's inheritance.
+        # A model may extend another model only along the schema's inheritance,
+        # checked against the nearest bound ancestor (unbound classes between
+        # them still inherit its attributes).
         def check_parent!(graph, schema_type)
           parent = superclass
-          return unless parent.respond_to?(:schema_type) && parent.schema_type
+          parent = parent.superclass while parent < Base && parent.schema_type.nil?
+          return unless parent < Base
           return if parent.graph.equal?(graph) && inherits_type?(schema_type, parent.schema_type)
 
           raise SchemaError, "#{self} (#{schema_type.name}) cannot extend #{parent} (#{parent.schema_type.name})"
@@ -91,13 +94,15 @@ module Pglpg
           end
         end
 
-        # Methods of the model classes and ActiveModel, plus the core Object
-        # methods an attribute must never shadow.
+        # Methods of the model classes and ActiveModel, public or private, plus
+        # the core Object methods an attribute must never shadow. Other
+        # Kernel and Object methods (format, display, ...) may be shadowed.
         def reserved_name?(name)
           [name, :"#{name}="].any? do |m|
             next true if CORE_METHODS.include?(m)
+            next false unless base_class.method_defined?(m) || base_class.private_method_defined?(m)
 
-            base_class.public_method_defined?(m) && !CORE_OWNERS.include?(base_class.instance_method(m).owner)
+            !CORE_OWNERS.include?(base_class.instance_method(m).owner)
           end
         end
       end

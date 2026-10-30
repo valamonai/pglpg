@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Write refusals caused by unique, foreign-key or restrict violations no longer
+  expose the underlying database constraint error through `Exception#cause`.
+  This applies to all writes, including unscoped keys and edges.
+
 - Scoped keys (ADR-0012): `key :uid, scope: :namespace` enforces a required
   string namespace/key pair across the declaring type and subtypes. Interactive
   caller-chosen keys require an explicit `key_scope_allowed` grant to learn

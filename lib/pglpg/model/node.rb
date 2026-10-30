@@ -70,6 +70,31 @@ module Pglpg
 
         def element_type_name(element) = element.key_label
 
+        def association_model(association)
+          model = case association.model
+                  when nil then Model.lookup(graph, :node, association.label)
+                  when String, Symbol then resolve_model_name(association.model.to_s)
+                  else association.model
+                  end
+          unless model.is_a?(Class) && model < Model::Node && model.graph.equal?(graph)
+            raise ConfigurationError, "#{self}##{association.name}: no node model of graph #{graph.name} " \
+                                      "for #{association.label}; give model:"
+          end
+          if association.label && !graph.type.node_type!(association.label).label?(model.schema_type.name)
+            raise ConfigurationError, "#{self}##{association.name}: #{association.label} nodes are not #{model}"
+          end
+
+          model
+        end
+
+        # nil for a name that doesn't resolve, so it reports as a missing model.
+        def resolve_model_name(name)
+          Object.const_get(name)
+        rescue NameError
+          nil
+        end
+
+
         private
 
         def own_associations = (@own_associations ||= {})
@@ -129,30 +154,7 @@ module Pglpg
         AssociationRelation.new(target, context, query, edge_model:, cached: (@association_cache || {})[association.name])
       end
 
-      def association_model(association)
-        graph = self.class.graph
-        model = case association.model
-                when nil then Model.lookup(graph, :node, association.label)
-                when String, Symbol then resolve_model_name(association.model.to_s)
-                else association.model
-                end
-        unless model.is_a?(Class) && model < Model::Node && model.graph.equal?(graph)
-          raise ConfigurationError, "#{self.class}##{association.name}: no node model of graph #{graph.name} " \
-                                    "for #{association.label}; give model:"
-        end
-        if association.label && !graph.type.node_type!(association.label).label?(model.schema_type.name)
-          raise ConfigurationError, "#{self.class}##{association.name}: #{association.label} nodes are not #{model}"
-        end
-
-        model
-      end
-
-      # nil for a name that doesn't resolve, so it reports as a missing model.
-      def resolve_model_name(name)
-        Object.const_get(name)
-      rescue NameError
-        nil
-      end
+      def association_model(association) = self.class.association_model(association)
 
       def load_identity(element)
         @schema_type = self.class.graph.type.node_type!(element.key_label)

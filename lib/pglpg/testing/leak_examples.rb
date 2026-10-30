@@ -93,6 +93,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
 
     ctx = pglpg_leak_graph.for(viewer: pglpg_viewer)
     before = Pglpg::Testing.observe(ctx, visible_refs)
+    raise "lazy association observations are missing" unless before.keys.count { _1.to_s.start_with?("assoc_") } == 5
     if before[:persons].size != 3 || before[:works_on].size != 3
       raise "the visibility policy hides the visible fixture; check pglpg_visible_attrs"
     end

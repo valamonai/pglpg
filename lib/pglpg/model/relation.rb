@@ -40,6 +40,11 @@ module Pglpg
         records
       end
 
+      # Preload symbols/strings and nested hashes (array values, including [],
+      # are allowed). Calls merge; static association/model validation runs
+      # now, before SQL: ArgumentError for invalid trees, ConfigurationError
+      # for missing target models. to_a/each/first preload; count, exists?,
+      # pluck and find do not. Batches above max_rows raise TooManyRows.
       def with_associations(*spec)
         tree = merge_tree(@preload, parse_tree(spec, []))
         validate_tree(model, tree)
@@ -136,7 +141,7 @@ module Pglpg
       end
 
       def target_model(owner_model, association)
-        owner_model.allocate.send(:association_model, association)
+        owner_model.association_model(association)
       end
 
       def validate_tree(owner_model, tree)
@@ -152,10 +157,14 @@ module Pglpg
         tree.each do |name, children|
           association = owner_model.associations.fetch(name)
           target = target_model(owner_model, association)
-          query = context.match.send(:node_refs, :owner, owners.map(&:ref))
+          query = context.match.node_refs(:owner, owners.map(&:ref))
           query = query.public_send(association.direction, association.edge_type, :n,
                                     association.label || target.schema_type.name, edge: :e)
-          pairs = query.return(:owner, :n).distinct.to_a
+          begin
+            pairs = query.return(:owner, :n).distinct.to_a
+          rescue TooManyRows
+            raise TooManyRows, "#{owner_model}##{name}: more than #{Pglpg.configuration.max_rows} distinct owner-target pairs; page the owners"
+          end
           targets = {}
           grouped = Hash.new { |h, k| h[k] = [] }
           pairs.each do |row|
@@ -199,11 +208,13 @@ module Pglpg
         spec.empty? ? q : q.order(var => spec)
       end
 
+      def derived_copy(copy) = copy
+
       # A copy with +query+; +shaped+ records ordering or pagination.
       def derive(query, shaped: @shaped)
         copy = clone(freeze: false)
         copy.instance_variable_set(:@query, query)
-        copy.instance_variable_set(:@cached, nil) if copy.is_a?(AssociationRelation)
+        derived_copy(copy)
         copy.instance_variable_set(:@filtered, true)
         copy.instance_variable_set(:@shaped, shaped)
         copy.freeze
@@ -223,29 +234,18 @@ module Pglpg
         super(model, context, query, filtered: true)
       end
 
-      def to_a
-        return super unless @cached
-        preload(@cached, @preload, model) unless @preload.empty?
-        @cached
-      end
-
       def first(n = nil)
         return super unless @cached
         return to_a.first if n.nil?
 
-        limit(n) # retain the relation’s argument and budget checks
+        unless n.is_a?(Integer) && n.positive? && n <= Pglpg.configuration.max_rows
+          raise ArgumentError, "count must be a positive Integer at most max_rows"
+        end
         to_a.first(n).freeze
       end
 
       def count = @cached ? @cached.size : super
       def exists? = @cached ? !@cached.empty? : super
-      def pluck(*names)
-        return super unless @cached
-        names = pluck_names!(model, names)
-        raise ArgumentError, "pluck needs at least one name" if names.empty?
-        @cached.map { |record| unwrap(project(record, names)) }
-      end
-
       # Structured conditions on the association's edge properties.
       def rel_where(**props) = derive(@query.where(e: props))
 
@@ -259,6 +259,8 @@ module Pglpg
       # limit or offset, so pagination always applies to the shape it was
       # written for.
       def with_rel
+        raise ArgumentError, "with_rel cannot discard pending preloads" unless @preload.empty?
+
         raise ArgumentError, "call with_rel before order, limit or offset" if @shaped
 
         BindingRelation.new(model, context, @query, edge_model: @edge_model)
@@ -275,6 +277,13 @@ module Pglpg
       alias create! new
 
       private
+
+      def rows = @cached || super
+
+      def derived_copy(copy)
+        copy.instance_variable_set(:@cached, nil)
+        super
+      end
 
       def compiled = @query.return(var).distinct
     end

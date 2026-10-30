@@ -43,6 +43,16 @@ module Pglpg
       props.empty? ? q : q.where(var => props)
     end
 
+    # Internal batched start. A pattern has either ref_id or ref_ids, never both.
+    def node_refs(var, refs)
+      raise ArgumentError, "a pattern has one start node" unless @state.nodes.empty?
+
+      var = new_var!(var)
+      refs.each { context.graph.check_ref!(_1, :node) }
+      pattern = NodePattern.new(var:, label: nil, ref_id: nil, ref_ids: refs.map(&:id).freeze)
+      with(nodes: { var => pattern }.freeze, last_var: var)
+    end
+
     # Follows an outgoing edge of +type+ from +from+ (default: the last node).
     def out(type, var, label = nil, edge: nil, from: nil, **props) = hop(:out, type, var, label, edge, from, props)
 
@@ -152,14 +162,6 @@ module Pglpg
     def inspect = "#<Pglpg::Query #{to_sql.first}>"
 
     private
-
-    # Internal batched start, with the same ref checks as #node.
-    def node_refs(var, refs)
-      refs.each { context.graph.check_ref!(_1, :node) }
-      q = node(var)
-      pattern = q.instance_variable_get(:@state).nodes.fetch(var.to_sym)
-      q.send(:with, nodes: { var.to_sym => pattern.with(ref_ids: refs.map(&:id).freeze) }.freeze)
-    end
 
     def with(**changes) = Query.new(context, @state.with(**changes))
 

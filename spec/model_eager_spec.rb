@@ -10,6 +10,7 @@ RSpec.describe "model eager loading" do
   it "batches, deduplicates and caches visible targets, including empty associations" do
     a = person(1, name: "A")
     b = person(1, name: "B")
+    person(1, name: "Empty")
     target = project(1, title: "Visible")
     hidden = project(3, title: "Hidden")
     2.times { link(:REVIEWED, a, target, 1, score: 1) }
@@ -24,9 +25,9 @@ RSpec.describe "model eager loading" do
     begin
       records = people.with_associations(:reviewed_projects).to_a
       expect(counts.size).to eq(1)
-      expect(records.map { |x| x.reviewed_projects.pluck(:title) }).to eq([["Visible"], ["Visible"]])
+      expect(records.map { |x| x.reviewed_projects.pluck(:title) }).to eq([["Visible"], ["Visible"], []])
       expect(records.first.reviewed_projects.to_a).to be_frozen
-      expect(records.first.reviewed_projects.first).to equal(records.last.reviewed_projects.first)
+      expect(records.first.reviewed_projects.first).to equal(records[1].reviewed_projects.first)
       expect(counts.size).to eq(1)
       expect(records.first.reviewed_projects.where(title: "Visible").count).to eq(1)
     ensure
@@ -71,6 +72,7 @@ RSpec.describe "model eager loading" do
       Pglpg.configuration.max_rows = old
     end
   end
+
   it "clears caches after reload and save, and bypasses them on modified relations" do
     a = person(1, name: "A")
     t = project(1, title: "First")
@@ -99,9 +101,71 @@ RSpec.describe "model eager loading" do
     end
     begin
       records = people.with_associations(:known).with_associations(known: :known_by).to_a
-      expect(counts.size).to eq(3)
+      expect(counts.size).to eq(1 + 2)
       records.each { |owner| owner.known.each { |target| target.known_by.to_a } }
-      expect(counts.size).to eq(3)
+      expect(counts.size).to eq(1 + 2)
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+  end
+
+  it "rejects converting pending preloads into binding queries" do
+    owner = people.find(person(1))
+    expect { owner.known.with_associations(:known_by).with_rel }.to raise_error(ArgumentError, /pending preloads/)
+  end
+
+  it "deduplicates symmetric self-loops just as lazy reads do" do
+    Pglpg.configuration.trusted_writer_allowed = ->(_) { true }
+    g = Pglpg::Graph.define(:eager_loop) do
+      column :classification, :integer
+      node :P
+      edge :LINK, from: :P, to: :P, symmetric: true, allow_self_loops: true
+    end
+    g.storage.create!
+    model = Class.new(Pglpg::Model::Node) do
+      graph g, type: :P
+      has_many :links, :both, edge: :LINK
+    end
+    context = g.for(viewer: Viewer.new(2))
+    writer = context.trusted_writer
+    ref = writer.insert_node(:P, attrs: { classification: 1 })
+    writer.insert_edge(:LINK, from: ref, to: ref, attrs: { classification: 1 })
+    owner = model.in(context).with_associations(:links).first
+    expect(owner.links.map(&:ref)).to eq(model.in(context).find(ref).links.map(&:ref))
+    expect(owner.links.map(&:ref)).to eq([ref])
+  end
+
+
+  it "skips empty intermediate batches and clears a destroyed owner's cache" do
+    ref = person(1)
+    owner = people.with_associations(known: :known_by).first
+    expect(owner.known.to_a).to eq([])
+    expect(owner.known.to_a).to be_frozen
+    Pglpg.configuration.trusted_writer_allowed = ->(_) { true }
+    owner.destroy(writer: owner.context.trusted_writer)
+    expect(owner.instance_variable_get(:@association_cache)).to be_nil
+  end
+
+  it "serves cached terminals and bypasses the cache for every modifier" do
+    a = person(1); t = project(1, title: "T")
+    link(:REVIEWED, a, t, 1, score: 1)
+    owner = people.with_associations(:reviewed_projects).first
+    statements = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*args|
+      statements << args.last[:sql] if args.last[:sql].match?(/SELECT .*spec_kg_nodes/i)
+    end
+    begin
+      relation = owner.reviewed_projects
+      expect(relation.count).to eq(1)
+      expect(relation.exists?).to be(true)
+      relation.first; relation.first(1); relation.to_a; relation.pluck(:title)
+      expect(statements).to be_empty
+      [relation.where(title: "T"), relation.order(:title), relation.limit(1), relation.offset(0),
+       relation.rel_where(score: 1), relation.with_rel].each do |modified|
+        before = statements.size
+        modified.to_a
+        expect(statements.size - before).to eq(1)
+      end
     ensure
       ActiveSupport::Notifications.unsubscribe(subscriber)
     end

@@ -45,6 +45,25 @@
     is missing or hidden.
   - After a create, generated keys and timestamps are unknown until
     `reload`. A caller's rollback is not tracked.
+- Model layer, associations (ADR-0010 §5):
+  - `has_many name, :out | :in | :both, edge:, label: nil, model: nil` on a
+    node model defines a method returning a `Pglpg::Model::AssociationRelation`.
+    `:both` is for symmetric types, `:out` / `:in` for directed ones. The
+    target label defaults to the edge type's other endpoint and the model to
+    the one registered for it. Declaring checks the direction, that the
+    owner can be an endpoint, and name clashes; associations are inherited.
+  - A target query returns each visible target once: duplicates are removed
+    before `order`, `limit`, `offset`, `count` and `exists?`. `rel_where`
+    filters on edge properties ("at least one matching visible edge");
+    `rel_order` raises there.
+  - `with_rel` returns a `Pglpg::Model::BindingRelation`: one
+    `[target, edge]` pair per matching edge, counted and paginated as pairs,
+    with `rel_order`. It must come before `order`, `limit` or `offset`.
+    `each_with_rel` enumerates it. Edges load as the registered edge model.
+  - Associations need a saved owner, start from it (so its visibility
+    applies) and can't build records yet.
+  - The shared leak suite observes every association of every visible owner:
+    targets, counts, `exists?`, `first`, pagination, `rel_where` and pairs.
 - `Context#reachable(from:, via:, max_depth:, max_nodes:, direction: :out, deadline: nil)`
   returns a `Pglpg::Reachability`: visible nodes with their minimum depth,
   ordered by depth then id, plus `complete` and `stopped_at_depth`.

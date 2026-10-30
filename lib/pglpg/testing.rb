@@ -69,7 +69,54 @@ module Pglpg
       out[:last_by_name] = element_data(m.().node(:p, :Person).order(p: { name: :desc }).first&.fetch(:p))
       out[:find] = refs.map { element_data(ctx.find(_1)) }
       out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, uid: _1)) }
+      out.merge(observe_models(ctx, refs))
+    end
+
+    # The same observations through the model layer (ADR-0010).
+    def observe_models(ctx, refs)
+      models = leak_models(ctx.graph)
+      relations = {
+        persons: -> { models[:Person].in(ctx).order(:name) },
+        ranked: -> { models[:Person].in(ctx).where(rank: Pglpg.gte(2)).order(rank: :desc) },
+        persons_page: -> { models[:Person].in(ctx).order(:name).limit(2).offset(1) },
+        projects: -> { models[:Project].in(ctx) },
+        works_on: -> { models[:WORKS_ON].in(ctx).order(:role) },
+        leads: -> { models[:WORKS_ON].in(ctx).where(role: "lead") },
+        knows: -> { models[:KNOWS].in(ctx) },
+        friends: -> { models[:FRIEND].in(ctx) },
+        friends_page: -> { models[:FRIEND].in(ctx).limit(1).offset(1) }
+      }
+      out = {}
+      relations.each do |name, r|
+        out[:"model_#{name}"] = r.().map { model_data(_1) }
+        out[:"model_#{name}_count"] = r.().count
+        out[:"model_#{name}_exists"] = r.().exists?
+        out[:"model_#{name}_first"] = model_data(r.().first)
+      end
+      out[:model_find_by] = %w[P1 P2 P3 H1].map { model_data(models[:Person].in(ctx).find_by(uid: _1)) }
+      out[:model_find] = refs.map do |ref|
+        model = ref.node? ? models[:Person] : models[:WORKS_ON]
+        model_data(model.in(ctx).find(ref))
+      rescue Pglpg::Model::RecordNotFound
+        nil
+      end
       out
+    end
+
+    def model_data(record)
+      return nil if record.nil?
+
+      data = [record.class.schema_type.name, record.id, record.attributes, record.extra_properties]
+      data + (record.is_a?(Pglpg::Model::Edge) ? [record.source.id, record.target.id] : [record.labels])
+    end
+
+    # One model per type of the leak graph, built once per graph.
+    def leak_models(leak_graph)
+      (@leak_models ||= ObjectSpace::WeakKeyMap.new)[leak_graph] ||=
+        %i[Person Project WORKS_ON KNOWS FRIEND].to_h do |type|
+          base = leak_graph.type.node_types.key?(type) ? Pglpg::Model::Node : Pglpg::Model::Edge
+          [type, Class.new(base) { graph(leak_graph, type:) }]
+        end
     end
 
     def element_data(element)
@@ -83,4 +130,5 @@ module Pglpg
   end
 end
 
+require_relative "model"
 require_relative "testing/leak_examples" if defined?(RSpec)

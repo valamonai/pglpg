@@ -107,6 +107,18 @@ module Pglpg
       eager = observe_associations(ctx, models, owners)
       eager.each { |name, value| raise "preload differs from lazy #{name}" unless value == out.fetch(name) }
       out[:eager_associations] = eager
+      nested = models[:Person].in(ctx).with_associations(friends: :friends, projects: :people)
+      out[:eager_nested] = nested.map do |owner|
+        [owner.uid, { friends: :friends, projects: :people }.map do |name, child|
+          owner.public_send(name).map do |target|
+            cached = target.public_send(child).map { model_data(_1) }
+            lazy = target.class.in(ctx).find(target.ref).public_send(child).map { model_data(_1) }
+            raise "nested preload differs from lazy #{name}.#{child}" unless cached == lazy
+
+            [model_data(target), cached]
+          end
+        end]
+      end
       out
     end
 

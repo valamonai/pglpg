@@ -173,4 +173,38 @@ RSpec.describe "storage DDL atomicity" do
   ensure
     c&.execute("DROP TABLE IF EXISTS atomic_ddl_edges, atomic_ddl_nodes")
   end
+
+  it "commits successful nested creation and synchronization with its caller", :committed do
+    c = ActiveRecord::Base.connection
+    expect(c.transaction_open?).to be(false)
+    graph = schema
+    upgraded = schema(scoped: true)
+    c.transaction do
+      expect(graph.storage.create!(c)).to be_nil
+      insert(c, graph, { uid: "original", namespace: "team" })
+      expect(upgraded.storage.sync_constraints!(c)).to be_nil
+      Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do |observer|
+          expect(observer).not_to equal(c)
+          expect(observer.select_value("SELECT to_regclass('atomic_ddl_nodes')::text")).to be_nil
+        end
+      end.value
+    end
+    expect(c.transaction_open?).to be(false)
+    Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |observer|
+        observer.transaction do
+          expect(observer.select_value("SELECT to_regclass('atomic_ddl_nodes')::text")).not_to be_nil
+          expect(properties(observer, graph)).to eq([{ "uid" => "original", "namespace" => "team" }])
+          expect do
+            observer.transaction(requires_new: true) { insert(observer, graph, { uid: "original", namespace: "team" }) }
+          end.to raise_error(ActiveRecord::RecordNotUnique)
+          insert(observer, graph, { uid: "original", namespace: "other" })
+        end
+      end
+    end.value
+  ensure
+    graph&.storage&.drop!(c)
+  end
+
 end

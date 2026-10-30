@@ -100,7 +100,30 @@ module Pglpg
       rescue Pglpg::Model::RecordNotFound
         nil
       end
-      out
+      out.merge(observe_associations(ctx, models))
+    end
+
+    # Association target and binding queries from every visible owner.
+    def observe_associations(ctx, models)
+      pair = ->((node, edge)) { [model_data(node), model_data(edge)] }
+      owners = models[:Person].in(ctx).order(:uid).to_a + models[:Project].in(ctx).order(:uid).to_a
+      owners.to_h do |owner|
+        data = owner.class.associations.keys.to_h do |name|
+          targets = -> { owner.public_send(name) }
+          [name, {
+            rows: targets.().map { model_data(_1) },
+            count: targets.().count,
+            exists: targets.().exists?,
+            first: model_data(targets.().first),
+            page: targets.().limit(1).offset(1).map { model_data(_1) },
+            pairs: targets.().with_rel.map(&pair),
+            pairs_count: targets.().with_rel.count,
+            pairs_page: targets.().with_rel.limit(1).offset(1).map(&pair)
+          }]
+        end
+        data[:leads] = owner.projects.rel_where(role: "lead").map { model_data(_1) } if owner.respond_to?(:projects)
+        [:"assoc_#{owner.uid}", data]
+      end
     end
 
     def model_data(record)
@@ -116,6 +139,12 @@ module Pglpg
         %i[Person Project WORKS_ON KNOWS FRIEND].to_h do |type|
           base = leak_graph.type.node_types.key?(type) ? Pglpg::Model::Node : Pglpg::Model::Edge
           [type, Class.new(base) { graph(leak_graph, type:) }]
+        end.tap do |models|
+          models[:Person].has_many :projects, :out, edge: :WORKS_ON
+          models[:Person].has_many :known, :out, edge: :KNOWS
+          models[:Person].has_many :known_by, :in, edge: :KNOWS
+          models[:Person].has_many :friends, :both, edge: :FRIEND
+          models[:Project].has_many :people, :in, edge: :WORKS_ON
         end
     end
 

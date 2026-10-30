@@ -70,6 +70,7 @@ module Pglpg
 
         def element_type_name(element) = element.key_label
 
+        # Internal association target resolution, shared by lazy and eager reads.
         def association_model(association)
           model = case association.model
                   when nil then Model.lookup(graph, :node, association.label)
@@ -93,7 +94,6 @@ module Pglpg
         rescue NameError
           nil
         end
-
 
         private
 

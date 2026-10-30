@@ -238,9 +238,9 @@ module Pglpg
         return super unless @cached
         return to_a.first if n.nil?
 
-        unless n.is_a?(Integer) && n.positive? && n <= Pglpg.configuration.max_rows
-          raise ArgumentError, "count must be a positive Integer at most max_rows"
-        end
+        raise ArgumentError, "limit must be a positive Integer" unless n.is_a?(Integer) && n.positive?
+        max_rows = Pglpg.configuration.max_rows
+        raise ArgumentError, "limit exceeds max_rows (#{max_rows})" if n > max_rows
         to_a.first(n).freeze
       end
 

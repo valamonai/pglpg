@@ -115,7 +115,6 @@ RSpec.describe "model eager loading" do
   end
 
   it "deduplicates symmetric self-loops just as lazy reads do" do
-    Pglpg.configuration.trusted_writer_allowed = ->(_) { true }
     g = Pglpg::Graph.define(:eager_loop) do
       column :classification, :integer
       node :P
@@ -127,7 +126,7 @@ RSpec.describe "model eager loading" do
       has_many :links, :both, edge: :LINK
     end
     context = g.for(viewer: Viewer.new(2))
-    writer = context.trusted_writer
+    writer = context
     ref = writer.insert_node(:P, attrs: { classification: 1 })
     writer.insert_edge(:LINK, from: ref, to: ref, attrs: { classification: 1 })
     owner = model.in(context).with_associations(:links).first
@@ -137,13 +136,21 @@ RSpec.describe "model eager loading" do
 
 
   it "skips empty intermediate batches and clears a destroyed owner's cache" do
-    ref = person(1)
-    owner = people.with_associations(known: :known_by).first
-    expect(owner.known.to_a).to eq([])
-    expect(owner.known.to_a).to be_frozen
-    Pglpg.configuration.trusted_writer_allowed = ->(_) { true }
-    owner.destroy(writer: owner.context.trusted_writer)
-    expect(owner.instance_variable_get(:@association_cache)).to be_nil
+    person(1)
+    statements = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*args|
+      statements << args.last[:sql] if args.last[:sql].match?(/SELECT .*spec_kg_nodes/i)
+    end
+    begin
+      owner = ModelSpec::Person.in(ctx(4)).with_associations(known: :known_by).first
+      expect(statements.size).to eq(2) # root + empty known; known_by is skipped
+      expect(owner.known.to_a).to eq([])
+      expect(owner.known.to_a).to be_frozen
+      owner.destroy(writer: owner.context.trusted_writer)
+      expect(owner.instance_variable_get(:@association_cache)).to be_nil
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
   end
 
   it "serves cached terminals and bypasses the cache for every modifier" do

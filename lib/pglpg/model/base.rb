@@ -13,8 +13,28 @@ module Pglpg
 
       # Attributes are assigned as given: no form coercion ("42" stays a
       # String). The schema checks values on validation.
+      #
+      # Every conversion copies Strings and Arrays, so the dirty baseline and
+      # the caller's object never share the record's value, and in-place
+      # edits (tags << "b", name << "e") count as changes.
       class StrictType < ActiveModel::Type::Value
-        def cast(value) = value
+        def cast(value) = copy(value)
+
+        def deserialize(value) = copy(value)
+
+        def serialize(value) = copy(value)
+
+        def changed_in_place?(raw_old_value, new_value) = raw_old_value != new_value
+
+        private
+
+        def copy(value)
+          case value
+          when Array then value.map { copy(_1) }
+          when String then value.dup
+          else value
+          end
+        end
       end
 
       STRICT = StrictType.new
@@ -200,6 +220,10 @@ module Pglpg
       end
 
       private
+
+      # ActiveModel casts lazily, on first read; copy on assignment so a
+      # caller who changes the object afterwards doesn't change the record.
+      def _write_attribute(name, value) = super(name, STRICT.cast(value))
 
       def load_element(context, element)
         @attributes = self.class._default_attributes.deep_dup

@@ -56,8 +56,10 @@ module Pglpg
         self
       end
 
+      # Labels follow from the type, so they are known without a reload.
       def create_element(target, properties, attrs)
         @ref = target.insert_node(schema_type.name, properties:, attrs:)
+        @labels = schema_type.labels.map(&:to_sym).freeze
       end
 
       def update_element(target, properties, attrs)

@@ -18,6 +18,8 @@ RSpec.describe "Pglpg::Model writes" do
       # Local state is what was assigned: the generated key arrives on reload.
       expect(ann.uid).to be_nil
       expect(ann.created_at).to be_nil
+      expect(ann.labels).to eq(%i[Agent Person])
+      expect(ann.schema_type.name).to eq(:Person)
       expect(ann.reload.uid).to eq(stored(ann.ref)[:uid])
       expect(ann.created_at).to be_a(Time)
     end
@@ -85,6 +87,30 @@ RSpec.describe "Pglpg::Model writes" do
       expect(ann.save).to be(true)
       expect(ann.changed?).to be(false)
       expect(stored(ann.ref).properties).to include(name: "Anne", rank: 7)
+    end
+
+    it "saves in-place changes to lists and strings" do
+      ann = people.create!(name: "Ann", tags: ["a"], classification: 1).reload
+      ann.tags << "b"
+      ann.name << "e"
+      expect(ann.changed).to contain_exactly("tags", "name")
+      expect(ann.changes).to eq("tags" => [%w[a], %w[a b]], "name" => %w[Ann Anne])
+      ann.save!
+      expect(stored(ann.ref).properties).to include(name: "Anne", tags: %w[a b])
+
+      # The baseline after a save is independent of the value too.
+      expect(ann.changed?).to be(false)
+      ann.tags << "c"
+      expect(ann.tags_changed?).to be(true)
+      ann.save!
+      expect(stored(ann.ref)[:tags]).to eq(%w[a b c])
+    end
+
+    it "keeps an assigned value independent of the caller's object" do
+      tags = ["a"]
+      ann = people.new(tags:, classification: 1)
+      tags << "b"
+      expect(ann.tags).to eq(%w[a])
     end
 
     it "removes a property set to nil" do

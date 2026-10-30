@@ -27,8 +27,10 @@ module Pglpg
         raise ConfigurationError, "pglpg needs PostgreSQL 18 or later"
       end
 
-      tables_sql(connection).each { connection.execute(_1) }
-      sync_constraints!(connection)
+      connection.transaction(requires_new: true) do
+        tables_sql(connection).each { connection.execute(_1) }
+        synchronize_constraints(connection)
+      end
     end
 
     def drop!(connection = graph.connection)
@@ -114,20 +116,11 @@ module Pglpg
       end
     end
 
-    # Adds missing generated constraints and drops stale ones.
+    # Atomic on the supplied connection: its own transaction or a savepoint
+    # within an ActiveRecord-managed caller transaction. Backfills belong in
+    # an explicit outer transaction on the same connection.
     def sync_constraints!(connection = graph.connection)
-      wanted = constraints(connection)
-      existing = existing_constraints(connection)
-      (existing.keys - wanted.keys).each do |name|
-        info = existing[name]
-        if info[:kind] == :index
-          connection.execute("DROP INDEX #{q(connection, name)}")
-        else
-          connection.execute("ALTER TABLE #{q(connection, info[:table])} DROP CONSTRAINT #{q(connection, name)}")
-        end
-      end
-      (wanted.keys - existing.keys).each { connection.execute(wanted[_1][:sql]) }
-      nil
+      connection.transaction(requires_new: true) { synchronize_constraints(connection) }
     end
 
     # Rewrites stored label sets to match the graph type.
@@ -154,6 +147,21 @@ module Pglpg
     end
 
     private
+
+    def synchronize_constraints(connection)
+      wanted = constraints(connection)
+      existing = existing_constraints(connection)
+      (existing.keys - wanted.keys).each do |name|
+        info = existing[name]
+        if info[:kind] == :index
+          connection.execute("DROP INDEX #{q(connection, name)}")
+        else
+          connection.execute("ALTER TABLE #{q(connection, info[:table])} DROP CONSTRAINT #{q(connection, name)}")
+        end
+      end
+      (wanted.keys - existing.keys).each { connection.execute(wanted[_1][:sql]) }
+      nil
+    end
 
     def type = graph.type
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Storage DDL is atomic: `sync_constraints!` and the entire `create!` operation
+  use a transaction on their supplied connection, or a savepoint in an existing
+  ActiveRecord transaction. A failed call restores its DDL and leaves a healthy
+  caller transaction usable. Outside a transaction, each call commits its own
+  transaction. Application backfills still need an explicit outer transaction
+  on the same connection to be rolled back with a failed schema transition.
+
 - Write refusals caused by unique, foreign-key or restrict violations no longer
   expose the underlying database constraint error through `Exception#cause`.
   This applies to all writes, including unscoped keys and edges.

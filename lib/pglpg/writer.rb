@@ -15,6 +15,8 @@ module Pglpg
   # statement, so they hold against the row the statement actually touches,
   # even under concurrent writes.
   class Writer
+    attr_reader :context
+
     def initialize(context, trusted:)
       @context = context
       @graph = context.graph

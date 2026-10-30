@@ -51,12 +51,53 @@ module Pglpg
         raise ArgumentError, "#{ref} is not an endpoint of #{self.ref}"
       end
 
+      # Endpoints of a new record: a node Ref or a node model. They can't
+      # change once the edge is stored.
+      def source=(node)
+        @source = endpoint(node)
+      end
+
+      def target=(node)
+        @target = endpoint(node)
+      end
+
+      validate :validate_endpoints
+
       private
 
       def load_identity(element)
         @source = element.source
         @target = element.target
         self
+      end
+
+      def endpoint(node)
+        raise ArgumentError, "the endpoints of a stored edge can't change" unless new_record?
+        return nil if node.nil?
+
+        ref = node.is_a?(Model::Node) ? node.ref : node
+        raise ArgumentError, "the endpoint is not stored yet" if ref.nil?
+
+        self.class.graph.check_ref!(ref, :node)
+      end
+
+      # A symmetric edge is stored in canonical order, so the record takes it.
+      def create_element(writer, properties, attrs)
+        @ref = writer.insert_edge(schema_type.name, from: source, to: target, properties:, attrs:)
+        @source, @target = @target, @source if symmetric? && @source.id > @target.id
+      end
+
+      def update_element(writer, properties, attrs)
+        writer.update_edge(ref, properties:, attrs:)
+      end
+
+      def delete_element(writer) = writer.delete_edge(ref)
+
+      def validate_endpoints
+        return unless new_record?
+
+        errors.add(:source, :blank) if source.nil?
+        errors.add(:target, :blank) if target.nil?
       end
     end
   end

@@ -46,12 +46,46 @@ module Pglpg
         self.class.property_names.include?(key.property) ? attribute(key.property.to_s) : extra_properties[key.property]
       end
 
+      validate :validate_node
+
       private
 
       def load_identity(element)
         @schema_type = self.class.graph.type.node_type!(element.key_label)
         @labels = element.labels
         self
+      end
+
+      def create_element(target, properties, attrs)
+        @ref = target.insert_node(schema_type.name, properties:, attrs:)
+      end
+
+      def update_element(target, properties, attrs)
+        target.update_node(ref, properties:, attrs:)
+      end
+
+      def delete_element(target)
+        raise NotTrusted, "destroying a node needs the trusted writer" unless target.is_a?(Pglpg::Writer)
+
+        target.delete_node(ref)
+      end
+
+      def key_property = schema_type.key&.property
+
+      # The generated key is not required on insert.
+      def required_now?(name) = new_record? ? name != key_property : super
+
+      # Keys are generated on insert and never change (ADR-0005, ADR-0010).
+      def validate_node
+        errors.add(:base, "#{schema_type.name} is abstract") if new_record? && schema_type.abstract?
+        key = key_property
+        return unless key && self.class.property_names.include?(key)
+
+        if new_record?
+          errors.add(key, "is generated and cannot be assigned") unless attribute(key.to_s).nil?
+        elsif attribute_changed?(key.to_s)
+          errors.add(key, "cannot be changed")
+        end
       end
     end
   end

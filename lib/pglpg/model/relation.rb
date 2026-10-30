@@ -63,6 +63,18 @@ module Pglpg
       # The first element matching +props+, or nil.
       def find_by(**props) = where(**props).first
 
+      # A new record bound to the relation's context.
+      def new(**attributes) = model.build(context, attributes)
+
+      alias build new
+
+      # Builds and saves a record; returns it, saved or not (check
+      # persisted? or errors).
+      def create(writer: nil, **attributes) = new(**attributes).tap { _1.save(writer:) }
+
+      # As #create, but raises RecordInvalid when validation fails.
+      def create!(writer: nil, **attributes) = new(**attributes).tap { _1.save!(writer:) }
+
       # The compiled Pglpg::Query, for debugging (to_sql, explain).
       def to_query = @query
 

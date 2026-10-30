@@ -17,7 +17,7 @@ module Pglpg
   class Query
     include Enumerable
 
-    NodePattern = Data.define(:var, :label, :ref_id)
+    NodePattern = Data.define(:var, :label, :ref_id, :ref_ids)
     EdgePattern = Data.define(:var, :type, :direction, :from_var, :to_var, :named)
     State = Data.define(:nodes, :edges, :conditions, :returns, :orders, :limit, :offset, :distinct, :last_var)
 
@@ -39,8 +39,18 @@ module Pglpg
       var = new_var!(var)
       label = check_label!(label)
       context.graph.check_ref!(ref, :node) if ref
-      q = with(nodes: { var => NodePattern.new(var:, label:, ref_id: ref&.id) }.freeze, last_var: var)
+      q = with(nodes: { var => NodePattern.new(var:, label:, ref_id: ref&.id, ref_ids: nil) }.freeze, last_var: var)
       props.empty? ? q : q.where(var => props)
+    end
+
+    # Internal batched start. A pattern has either ref_id or ref_ids, never both.
+    def node_refs(var, refs)
+      raise ArgumentError, "a pattern has one start node" unless @state.nodes.empty?
+
+      var = new_var!(var)
+      refs.each { context.graph.check_ref!(_1, :node) }
+      pattern = NodePattern.new(var:, label: nil, ref_id: nil, ref_ids: refs.map(&:id).freeze)
+      with(nodes: { var => pattern }.freeze, last_var: var)
     end
 
     # Follows an outgoing edge of +type+ from +from+ (default: the last node).
@@ -179,7 +189,7 @@ module Pglpg
         end
       else
         new_var!(var)
-        nodes = nodes.merge(var => NodePattern.new(var:, label:, ref_id: nil)).freeze
+        nodes = nodes.merge(var => NodePattern.new(var:, label:, ref_id: nil, ref_ids: nil)).freeze
       end
 
       # Checked against the node map including this hop's new node.
@@ -342,6 +352,11 @@ module Pglpg
       if node.ref_id
         sql << " AND " << n << ".id = "
         sql.bind(node.ref_id, "bigint")
+      end
+      if node.ref_ids
+        sql << " AND " << n << ".id = ANY("
+        sql.bind_text_array(node.ref_ids.map(&:to_s))
+        sql << "::bigint[])"
       end
       conditions_sql(sql, node.var, n)
     end

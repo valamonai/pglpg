@@ -101,13 +101,31 @@ module Pglpg
       rescue Pglpg::Model::RecordNotFound
         nil
       end
-      out.merge(observe_associations(ctx, models))
+      out.merge!(observe_associations(ctx, models))
+      owners = models[:Person].in(ctx).with_associations(:known, :known_by, :friends, :projects).to_a +
+               models[:Project].in(ctx).with_associations(:people).to_a
+      eager = observe_associations(ctx, models, owners)
+      eager.each { |name, value| raise "preload differs from lazy #{name}" unless value == out.fetch(name) }
+      out[:eager_associations] = eager
+      nested = models[:Person].in(ctx).with_associations(friends: :friends, projects: :people)
+      out[:eager_nested] = nested.map do |owner|
+        [owner.uid, { friends: :friends, projects: :people }.map do |name, child|
+          owner.public_send(name).map do |target|
+            cached = target.public_send(child).map { model_data(_1) }
+            lazy = target.class.in(ctx).find(target.ref).public_send(child).map { model_data(_1) }
+            raise "nested preload differs from lazy #{name}.#{child}" unless cached == lazy
+
+            [model_data(target), cached]
+          end
+        end]
+      end
+      out
     end
 
     # Association target and binding queries from every visible owner.
-    def observe_associations(ctx, models)
+    def observe_associations(ctx, models, owners = nil)
       pair = ->((node, edge)) { [model_data(node), model_data(edge)] }
-      owners = models[:Person].in(ctx).order(:uid).to_a + models[:Project].in(ctx).order(:uid).to_a
+      owners ||= models[:Person].in(ctx).order(:uid).to_a + models[:Project].in(ctx).order(:uid).to_a
       owners.to_h do |owner|
         data = owner.class.associations.keys.to_h do |name|
           targets = -> { owner.public_send(name) }

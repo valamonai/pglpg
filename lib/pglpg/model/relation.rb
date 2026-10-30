@@ -19,6 +19,7 @@ module Pglpg
         @query = query || model.pattern(context)
         @filtered = filtered
         @shaped = false
+        @preload = {}.freeze
         freeze
       end
 
@@ -33,7 +34,24 @@ module Pglpg
 
       def offset(n) = derive(@query.offset(n), shaped: true)
 
-      def to_a = compiled.to_a.map { |row| load_row(row) }
+      def to_a
+        records = rows
+        preload(records, @preload, model) unless @preload.empty?
+        records
+      end
+
+      # Preload symbols/strings and nested hashes (array values, including [],
+      # are allowed). Calls merge; static association/model validation runs
+      # now, before SQL: ArgumentError for invalid trees, ConfigurationError
+      # for missing target models. to_a/each/first preload; count, exists?,
+      # pluck and find do not. Batches above max_rows raise TooManyRows.
+      def with_associations(*spec)
+        tree = merge_tree(@preload, parse_tree(spec, []))
+        validate_tree(model, tree)
+        copy = clone(freeze: false)
+        copy.instance_variable_set(:@preload, tree)
+        copy.freeze
+      end
 
       def each(&) = to_a.each(&)
 
@@ -71,7 +89,7 @@ module Pglpg
         names = pluck_names!(model, names)
         raise ArgumentError, "pluck needs at least one name" if names.empty?
 
-        to_a.map { |record| unwrap(project(record, names)) }
+        rows.map { |record| unwrap(project(record, names)) }
       end
 
       # A new record bound to the relation's context.
@@ -92,6 +110,76 @@ module Pglpg
       def inspect = "#<#{self.class.name} #{model.name || model.base_class.name} #{compiled.to_sql.first}>"
 
       private
+
+      def rows = compiled.to_a.map { |row| load_row(row) }
+
+      def parse_tree(spec, ancestors)
+        raise ArgumentError, "cyclic preload tree" if ancestors.include?(spec.object_id)
+        ancestors = ancestors + [spec.object_id]
+        result = {}
+        spec.each do |item|
+          case item
+          when Symbol, String
+            key = item.to_sym
+            result[key] ||= {}.freeze
+          when Hash
+            raise ArgumentError, "cyclic preload tree" if ancestors.include?(item.object_id)
+            item.each do |key, value|
+              raise ArgumentError, "invalid association name" unless key.is_a?(Symbol) || key.is_a?(String)
+              children = value.is_a?(Array) ? value : [value]
+              result[key.to_sym] = merge_tree(result[key.to_sym] || {}, parse_tree(children, ancestors + [item.object_id]))
+            end
+          else
+            raise ArgumentError, "invalid preload specification"
+          end
+        end
+        result.freeze
+      end
+
+      def merge_tree(a, b)
+        a.merge(b) { |_key, left, right| merge_tree(left, right) }.freeze
+      end
+
+      def target_model(owner_model, association)
+        owner_model.association_model(association)
+      end
+
+      def validate_tree(owner_model, tree)
+        tree.each do |name, children|
+          association = owner_model.respond_to?(:associations) && owner_model.associations[name]
+          raise ArgumentError, "#{owner_model} has no association #{name}" unless association
+          validate_tree(target_model(owner_model, association), children)
+        end
+      end
+
+      def preload(owners, tree, owner_model)
+        return if owners.empty?
+        tree.each do |name, children|
+          association = owner_model.associations.fetch(name)
+          target = target_model(owner_model, association)
+          query = context.match.node_refs(:owner, owners.map(&:ref))
+          query = query.public_send(association.direction, association.edge_type, :n,
+                                    association.label || target.schema_type.name, edge: :e)
+          begin
+            pairs = query.return(:owner, :n).distinct.to_a
+          rescue TooManyRows
+            raise TooManyRows, "#{owner_model}##{name}: more than #{Pglpg.configuration.max_rows} distinct owner-target pairs; page the owners"
+          end
+          targets = {}
+          grouped = Hash.new { |h, k| h[k] = [] }
+          pairs.each do |row|
+            element = row.fetch(:n)
+            record = targets[element.ref] ||= target.instantiate(context, element)
+            grouped[row.fetch(:owner).ref] << record
+          end
+          owners.each do |owner|
+            cache = owner.instance_variable_get(:@association_cache) || {}
+            cache[name] = grouped[owner.ref].freeze
+            owner.instance_variable_set(:@association_cache, cache)
+          end
+          preload(targets.values, children, target)
+        end
+      end
 
       def var = model.query_var
 
@@ -120,10 +208,13 @@ module Pglpg
         spec.empty? ? q : q.order(var => spec)
       end
 
+      def derived_copy(copy) = copy
+
       # A copy with +query+; +shaped+ records ordering or pagination.
       def derive(query, shaped: @shaped)
         copy = clone(freeze: false)
         copy.instance_variable_set(:@query, query)
+        derived_copy(copy)
         copy.instance_variable_set(:@filtered, true)
         copy.instance_variable_set(:@shaped, shaped)
         copy.freeze
@@ -137,11 +228,24 @@ module Pglpg
     #   person.projects.rel_where(role: "lead").order(:title).limit(20)
     #   person.projects.with_rel.each { |project, works_on| ... }
     class AssociationRelation < Relation
-      def initialize(model, context, query, edge_model:)
+      def initialize(model, context, query, edge_model:, cached: nil)
         @edge_model = edge_model
+        @cached = cached
         super(model, context, query, filtered: true)
       end
 
+      def first(n = nil)
+        return super unless @cached
+        return to_a.first if n.nil?
+
+        raise ArgumentError, "limit must be a positive Integer" unless n.is_a?(Integer) && n.positive?
+        max_rows = Pglpg.configuration.max_rows
+        raise ArgumentError, "limit exceeds max_rows (#{max_rows})" if n > max_rows
+        to_a.first(n).freeze
+      end
+
+      def count = @cached ? @cached.size : super
+      def exists? = @cached ? !@cached.empty? : super
       # Structured conditions on the association's edge properties.
       def rel_where(**props) = derive(@query.where(e: props))
 
@@ -155,6 +259,8 @@ module Pglpg
       # limit or offset, so pagination always applies to the shape it was
       # written for.
       def with_rel
+        raise ArgumentError, "with_rel cannot discard pending preloads" unless @preload.empty?
+
         raise ArgumentError, "call with_rel before order, limit or offset" if @shaped
 
         BindingRelation.new(model, context, @query, edge_model: @edge_model)
@@ -172,6 +278,13 @@ module Pglpg
 
       private
 
+      def rows = @cached || super
+
+      def derived_copy(copy)
+        copy.instance_variable_set(:@cached, nil)
+        super
+      end
+
       def compiled = @query.return(var).distinct
     end
 
@@ -179,6 +292,8 @@ module Pglpg
     class BindingRelation < AssociationRelation
       # order(...) orders by target properties; rel_order(...) by edge ones.
       def rel_order(*names, **spec) = derive(order_query(:e, names, spec), shaped: true)
+
+      def with_associations(*) = raise(ArgumentError, "preloading binding relations is not supported")
 
       def with_rel = self
 

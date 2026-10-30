@@ -200,6 +200,7 @@ module Pglpg
         raise ArgumentError, "only a persisted record can be destroyed" unless persisted?
 
         delete_element(write_target(writer))
+        @association_cache = nil
         @destroyed = true
       end
 
@@ -232,6 +233,7 @@ module Pglpg
       def _write_attribute(name, value) = super(name, STRICT.cast(value))
 
       def load_element(context, element)
+        @association_cache = nil
         @attributes = self.class._default_attributes.deep_dup
         @context = context
         @ref = element.ref
@@ -265,6 +267,7 @@ module Pglpg
           update_element(target, changes_to(self.class.property_names), changes_to(self.class.column_names))
         end
         changes_applied
+        @association_cache = nil
         true
       end
 

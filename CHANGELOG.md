@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `with_associations` to model relations for batched, visibility-aware eager loading (ADR-0011). Preloaded associations are materialized reads and can become stale; reload, save, or destroy clears that instance's cache. Each batch uses a separate database snapshot and raises `TooManyRows` when its distinct owner–target pairs exceed `max_rows`.
+
 - Model layer, reads (ADR-0010; `require "pglpg/model"`):
   - `Pglpg::Model::Node` and `Pglpg::Model::Edge` are ActiveModel classes
     bound to a graph and a schema type with `graph Kg, type: :Person`. Their

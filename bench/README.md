@@ -189,3 +189,78 @@ Before anything is timed, the script checks that all three return identical resu
 | `REACH_BUFFER_SAMPLES` | `30` | Starts measured with `EXPLAIN` |
 | `REACH_TIMEOUT_MS` | `10000` | Statement timeout |
 | `REACH_NO_PARALLEL` | unset | `1` disables parallel workers |
+
+## Temporal experiment (ADR-0013, 0.3)
+
+`temporal.rb` is separate from the ordinary regression manifest and gates.
+Use a dedicated disposable benchmark database. `--load` replaces its synthetic
+bench tables. It adds date metadata through the migration helper and assigns
+33% active intervals, with the remainder split into expired and future
+intervals. `--active-percent 1..99` changes that mix. The existing visibility
+policy remains on every node and edge; OCCURRED_AT stays timeless.
+
+```bash
+PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --load --out tmp/bench/temporal-1m
+PGLPG_LIB=/absolute/path/to/v0.2.0/lib PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --baseline --out tmp/bench/temporal-reference
+PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --compare tmp/bench/temporal-reference --out tmp/bench/temporal-candidate
+```
+
+The reference uses the old library with an equivalent validity-aware policy:
+it tests compiler/result parity on identical data, not temporal API support in
+0.2. It never loads or alters data. Comparison fails closed on missing reference
+cells or different per-start identity/depth/completeness fingerprints. It does
+not establish managed-plan acceptance or replace the ordinary strict baseline
+gates. Run 1m and hub-heavy separately; preserve each reference before loading
+another fixture. The same commands accept `--fixture ci` for a small smoke run.
+
+Forty cells cover dated and explicit-any reads, two clearances, fixed paths,
+incoming/symmetric paths, hubs and bounded reachability. Each configuration runs
+warmups and 30 public-API timed samples per cell (override TEMPORAL_BENCH_RUNS),
+then separate bound-SQL JSON plans from up to three starts. It refuses empty
+workloads or result changes. Results retain library digest/runtime/manifest,
+samples, fingerprints, buffers, index sizes and plans.
+
+Configurations retain the original endpoint traversal indexes, then separately
+add endpoint-first composite btrees, endpoint-first covering btrees, or a partial
+expression GiST over daterange. A rolled-back batch of 1,000 raw inserts measures
+index maintenance separately; it does not measure authorization or Ruby writer
+throughput. No new default index follows from a single winning cell. Review
+latency, buffers, read shape, added bytes and write cost together.
+
+### Retained local evidence — 2026-11-02
+
+[Summary](evidence/temporal-2026-11-02.json) and
+[checksummed results/plans archive](evidence/temporal-2026-11-02.tar.gz) retain
+measurements of code `a421de25cc36cf13a2af92556665ee81b80caa5d`, compared with
+v0.2.0 `4439cfdb3e79ac849c97eb3d294b248fb3161fd8`. Ruby 4.0.6, ActiveRecord
+8.1.4, PostgreSQL 18.6 on a warm local database. Later evidence-only commits do
+not change the measured library; the reports also record its content digest.
+
+The ordinary CI fixture gate/self-test and strict ordinary 1m baseline gate
+passed. Every temporal result fingerprint matched the equivalent-policy
+reference for all 40 cells in each of four configurations on both 1m and
+hub-heavy. The archive includes samples, per-start identities, plans, index
+sizes, raw batch costs and manifests; library-location fields alone are
+normalized to repository-relative paths.
+
+| Configuration | 1m dated 3-hop hub L4 p95 ms | Hub-heavy dated 3-hop hub L4 p95 ms | Added hub-heavy index MiB | Hub-heavy raw 1000-insert p95 ms |
+|---|---:|---:|---:|---:|
+| Endpoint (existing) | 10.807 | 36.552 | 0 | 5.145 |
+| Composite | 10.061 | 35.015 | 146.35 | 6.822 |
+| Covering | 10.250 | 35.210 | 138.95 | 6.662 |
+| GiST | 10.989 | 45.545 | 32.43 | 6.875 |
+
+Keep existing endpoint indexes as the default. Some undated hub cells improve
+with added btrees, but the dated gains here are small and shape-dependent,
+with additional storage/write costs. GiST does not give a broad win. These are
+small warm single-client experiments with one active-date distribution, not a
+managed-plan SLA, write-throughput claim or the deferred pre-1.0 acceptance.
+No existing benchmark bound was loosened.
+
+The compressed evidence archive is deliberately retained in git: ordinary
+Actions artifacts expire after 90 days, and no release asset has been published
+for this unreleased feature. Keeping the exact samples and plans with the
+reviewed commit makes the evidence durable without an external storage
+lifecycle. Use the adjacent JSON summary and the table above for review;
+extract the archive for per-cell plans. The archive is excluded from the gem.
+Its size is an intentional repository-history cost, not a runtime dependency.

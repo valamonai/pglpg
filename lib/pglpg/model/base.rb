@@ -64,6 +64,14 @@ module Pglpg
 
           property_names.each { attribute(_1, STRICT) }
           column_names.each { attribute(_1, STRICT) }
+          if kind == :edge && schema_type.temporal?
+            Temporal::NAMES.each do |name|
+              if instance_methods(false).include?(name) || instance_methods(false).include?(:"#{name}=")
+                raise SchemaError, "#{schema_type.name}.#{name} clashes with temporal metadata"
+              end
+              attribute(name, Edge::BOUND)
+            end
+          end
           @graph = graph
           @schema_type = schema_type
           @property_names = property_names.freeze
@@ -197,6 +205,7 @@ module Pglpg
       # Deletes the element through the guarded write API (a node only
       # through the trusted writer). Returns true.
       def destroy(writer: nil)
+        context&.writable!
         raise ArgumentError, "only a persisted record can be destroyed" unless persisted?
 
         delete_element(write_target(writer))
@@ -252,6 +261,7 @@ module Pglpg
       # belong to this record's own context (identity).
       def write_target(writer)
         raise ArgumentError, "#{self.class} has no context; build it with Model.in(ctx).new" unless context
+        context.writable!
         raise ArgumentError, "#{self.class} was destroyed" if destroyed?
         return context if writer.nil?
         raise ArgumentError, "writer: expects a Pglpg::Writer" unless writer.is_a?(Pglpg::Writer)

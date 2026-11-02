@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+### Breaking
+
+- Temporal-capable reads require `graph.for(viewer:, as_of: Date)` or
+  `as_of: :any`; omitted/nil mode permits only node-only and statically
+  timeless-only reads. Generic edge Ref lookups in graphs with temporal types
+  require a mode even for missing edges. Date contexts refuse all data writes
+  with `ReadOnlyContext`, including model no-op saves and trusted-writer access.
+- Temporal inserts and every temporal upsert require explicit `valid_from:`
+  presence (nil is unbounded); omitted update bounds preserve stored values.
+  On upsert, an omitted upper bound is nil on insert and preserved on conflict.
+- Enabling temporal types on existing populated tables requires
+  `storage.enable_temporal!(types:, backfill: nil)` in an explicit migration.
+  Reserved `valid_from`/`valid_to` names must first be removed from application
+  declarations. Incompatible legacy columns require an application migration;
+  timestamp values are never silently cast to dates. The helper locks the
+  table and atomically installs metadata/checks plus an optional backfill.
+
+### Added
+
+- Context inspection shows an explicitly selected Date or `:any` read mode.
+- Opt-in `temporal: true` edge types (ADR-0013): exact Date metadata,
+  half-open `[valid_from, valid_to)` intervals, nil unbounded, finite dates
+  0001-01-01 through 9999-12-31. DateTime, Time and String are rejected.
+- Context-wide date eligibility on direct edge reads, every pattern and
+  reachability hop, models, lazy associations and eager batches, combined with
+  current visibility before counts, pagination, limits and completeness.
+  Timeless edges remain eligible; `:any` ignores only validity. This is valid
+  time on the stored graph, not historical values or historical permissions.
+- `TemporalModeRequired` and `TemporalMigrationRequired` errors. Generated
+  CHECK digests track explicit temporal enablement; changed/absent or
+  unvalidated checks on populated temporal types require acknowledgement.
+  Omitted backfill preserves bounds, and disabling types retains columns.
+- Edge values expose `temporal?`, `valid_from`, `valid_to`; temporal models
+  have strict metadata attributes, explicit nil assignment tracking and bound
+  pluck support. Lifetime pair uniqueness remains unchanged: gaps require
+  separate non-pair-unique episode Refs; overlaps are allowed.
+- Optional `pglpg_temporal` shared leak-fixture mode, and `bench/temporal.rb`
+  for same-fixture reference comparisons and temporal index experiments.
+
+### Security
+
+- Schema constraint failures use a generic ValidationError without a database
+  cause or stored-row detail. Temporal upsert argument validation is independent
+  of visible, hidden or absent pair occupancy.
+
 ## 0.2.0 (2026-10-30)
 
 ### Breaking

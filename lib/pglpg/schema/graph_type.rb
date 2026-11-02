@@ -27,9 +27,15 @@ module Pglpg
         node_types.values.select { _1.label?(label) }
       end
 
+      def temporal? = edge_types.values.any?(&:temporal?)
+
       def resolve!
         node_types.each_value { _1.resolve!(self) }
         edge_types.each_value { _1.resolve!(self) }
+        if temporal?
+          collisions = (node_columns.keys + edge_columns.keys + node_types.values.flat_map { _1.properties.keys } + edge_types.values.flat_map { _1.properties.keys }) & Temporal::NAMES
+          raise SchemaError, "reserved temporal names: #{collisions.join(", ")}" unless collisions.empty?
+        end
         [node_types, edge_types, node_columns, edge_columns].each(&:freeze)
         freeze
       end

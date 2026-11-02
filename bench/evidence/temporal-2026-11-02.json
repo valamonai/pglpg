@@ -1,0 +1,116 @@
+{
+  "code_sha": "a421de25cc36cf13a2af92556665ee81b80caa5d",
+  "baseline_sha": "4439cfdb3e79ac849c97eb3d294b248fb3161fd8",
+  "date": "2026-11-02",
+  "environment": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "scope": "synthetic warm local evidence; not managed-plan acceptance",
+  "specs": {
+    "examples": 285,
+    "failures": 0
+  },
+  "ordinary_1m_strict_gate": "passed",
+  "ci_gate_and_selftest": "passed",
+  "index_decision": "retain endpoint traversal indexes; no automatic temporal index",
+  "temporal": {
+    "1m": {
+      "manifest": {
+        "fixture": "1m",
+        "generator": 3,
+        "active_percent": 33,
+        "date": "2020-06-01",
+        "temporal_types": [
+          "KNOWS",
+          "INVOLVED_IN",
+          "MEMBER_OF",
+          "FRIEND"
+        ]
+      },
+      "code_sha": "a421de25cc36cf13a2af92556665ee81b80caa5d",
+      "library_digest": "8a4000ffbc3e01b1bfeeec80010f31410b385022a1f6a25bd2c6d00f9e4339e0",
+      "reference_library_digest": "513a6329076ca7212f1f24a2ed09cebc8724415c9ad2ea89b2b141137aee054a",
+      "all_40_cells_equal_in_each_configuration": true,
+      "configs": {
+        "endpoint": {
+          "dated_worst_p95_ms": 10.807,
+          "added_index_bytes": 0,
+          "raw_1000_insert_p95_ms": 6.579,
+          "dated_hop3_hub_L4_p95_ms": 10.807,
+          "dated_sym2_hub_L4_p95_ms": 6.378
+        },
+        "composite": {
+          "dated_worst_p95_ms": 10.061,
+          "added_index_bytes": 132579328,
+          "raw_1000_insert_p95_ms": 11.17,
+          "dated_hop3_hub_L4_p95_ms": 10.061,
+          "dated_sym2_hub_L4_p95_ms": 5.646
+        },
+        "covering": {
+          "dated_worst_p95_ms": 10.25,
+          "added_index_bytes": 126500864,
+          "raw_1000_insert_p95_ms": 6.173,
+          "dated_hop3_hub_L4_p95_ms": 10.25,
+          "dated_sym2_hub_L4_p95_ms": 6.132
+        },
+        "gist": {
+          "dated_worst_p95_ms": 10.989,
+          "added_index_bytes": 29106176,
+          "raw_1000_insert_p95_ms": 6.869,
+          "dated_hop3_hub_L4_p95_ms": 10.989,
+          "dated_sym2_hub_L4_p95_ms": 6.009
+        }
+      }
+    },
+    "hub-heavy": {
+      "manifest": {
+        "fixture": "hub-heavy",
+        "generator": 3,
+        "active_percent": 33,
+        "date": "2020-06-01",
+        "temporal_types": [
+          "KNOWS",
+          "INVOLVED_IN",
+          "MEMBER_OF",
+          "FRIEND"
+        ]
+      },
+      "code_sha": "a421de25cc36cf13a2af92556665ee81b80caa5d",
+      "library_digest": "8a4000ffbc3e01b1bfeeec80010f31410b385022a1f6a25bd2c6d00f9e4339e0",
+      "reference_library_digest": "513a6329076ca7212f1f24a2ed09cebc8724415c9ad2ea89b2b141137aee054a",
+      "all_40_cells_equal_in_each_configuration": true,
+      "configs": {
+        "endpoint": {
+          "dated_worst_p95_ms": 36.552,
+          "added_index_bytes": 0,
+          "raw_1000_insert_p95_ms": 5.145,
+          "dated_hop3_hub_L4_p95_ms": 36.552,
+          "dated_sym2_hub_L4_p95_ms": 17.98
+        },
+        "composite": {
+          "dated_worst_p95_ms": 35.015,
+          "added_index_bytes": 153460736,
+          "raw_1000_insert_p95_ms": 6.822,
+          "dated_hop3_hub_L4_p95_ms": 35.015,
+          "dated_sym2_hub_L4_p95_ms": 18.964
+        },
+        "covering": {
+          "dated_worst_p95_ms": 35.21,
+          "added_index_bytes": 145694720,
+          "raw_1000_insert_p95_ms": 6.662,
+          "dated_hop3_hub_L4_p95_ms": 35.21,
+          "dated_sym2_hub_L4_p95_ms": 21.928
+        },
+        "gist": {
+          "dated_worst_p95_ms": 45.545,
+          "added_index_bytes": 34004992,
+          "raw_1000_insert_p95_ms": 6.875,
+          "dated_hop3_hub_L4_p95_ms": 45.545,
+          "dated_sym2_hub_L4_p95_ms": 22.195
+        }
+      }
+    }
+  },
+  "ci_initial_probe_failure": "one L4 exact-cap probe at 2.18 ms versus sub-1-ms baseline, identical 12 buffers; unchanged failed-job retry requested",
+  "archive": "temporal-2026-11-02.tar.gz",
+  "archive_sha256": "3c78495167b36bf4a5191d9f907d4344b4252e7ee4da6411387beef8073df344",
+  "library_location_fields": "normalized to repository-relative paths; measurements and fingerprints unchanged"
+}

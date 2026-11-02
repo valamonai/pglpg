@@ -38,7 +38,7 @@ RSpec.describe "graph type DSL" do
     expect { define { node(:A); edge :E, from: :A, to: :Z } }.to raise_error(Pglpg::SchemaError, /unknown node type Z/)
     expect { define { node(:A); edge :E, from: :A, to: :A, allow_self_loops: true } }
       .to raise_error(Pglpg::SchemaError, /needs symmetric/)
-    expect { define { node(:A); edge :E, from: :A, to: :A, temporal: true } }.to raise_error(Pglpg::SchemaError, /0.3/)
+    expect { define { node(:A); edge :E, from: :A, to: :A, temporal: :yes } }.to raise_error(Pglpg::SchemaError, /temporal/)
     expect { define { node_column :labels, :string } }.to raise_error(Pglpg::SchemaError, /reserved/)
     expect { define { node "bad name" } }.to raise_error(Pglpg::SchemaError, /invalid/)
   end

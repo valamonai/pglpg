@@ -21,6 +21,7 @@ module Pglpg
       @graph = context.graph
       @from = @graph.check_ref!(from, :node)
       @types = edge_types!(via, direction)
+      @context.temporal_mode!(@types.map { @graph.type.edge_type!(_1) })
       @direction = direction
       @max_depth = positive_integer!(max_depth, "max_depth")
       @max_nodes = positive_integer!(max_nodes, "max_nodes")
@@ -87,6 +88,7 @@ module Pglpg
       sql << " WHERE " << e << "." << near << " = ANY(b.frontier) AND " << e << ".type = ANY("
       sql.bind_text_array(@types) << ") AND "
       @context.append_edge_visible(sql, e)
+      @context.append_temporal(sql, e, @types.map { @graph.type.edge_type!(_1) })
     end
 
     def edge_types!(via, direction)

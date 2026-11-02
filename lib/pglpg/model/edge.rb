@@ -9,6 +9,12 @@ module Pglpg
     #     graph Kg, type: :WORKS_ON
     #   end
     class Edge < Base
+      class BoundType < StrictType
+        def cast(value) = Temporal.date(value)
+        alias deserialize cast
+        alias serialize cast
+      end
+      BOUND = BoundType.new.freeze
       class << self
         def base_class = Model::Edge
 
@@ -43,6 +49,8 @@ module Pglpg
 
       def symmetric? = schema_type.symmetric?
 
+      def temporal? = schema_type.temporal?
+
       # The endpoint opposite +ref+ (the same node for a self-loop).
       def other(ref)
         return target if ref == source
@@ -62,10 +70,23 @@ module Pglpg
       end
 
       validate :validate_endpoints
+      validate :validate_validity
 
       private
 
+      def _write_attribute(name, value)
+        if Temporal::NAMES.include?(name.to_sym) && temporal?
+          value = BOUND.cast(value)
+          (@validity_assigned ||= {})[name.to_sym] = true
+        end
+        super(name, value)
+      end
+
       def load_identity(element)
+        @validity_assigned = {}
+        if temporal?
+          Temporal::NAMES.each { @attributes.write_from_database(_1.to_s, element.public_send(_1)) }
+        end
         @source = element.source
         @target = element.target
         self
@@ -83,15 +104,33 @@ module Pglpg
 
       # A symmetric edge is stored in canonical order, so the record takes it.
       def create_element(writer, properties, attrs)
-        @ref = writer.insert_edge(schema_type.name, from: source, to: target, properties:, attrs:)
+        @ref = writer.insert_edge(schema_type.name, from: source, to: target, properties:, attrs:, **validity_changes)
         @source, @target = @target, @source if symmetric? && @source.id > @target.id
       end
 
       def update_element(writer, properties, attrs)
-        writer.update_edge(ref, properties:, attrs:)
+        writer.update_edge(ref, properties:, attrs:, **validity_changes)
       end
 
       def delete_element(writer) = writer.delete_edge(ref)
+
+      def validity_changes
+        return {} unless temporal?
+
+        names = new_record? ? (@validity_assigned || {}).keys : Temporal::NAMES.select { attribute_changed?(_1.to_s) }
+        names.to_h { [_1, public_send(_1)] }
+      end
+
+      def validate_validity
+        return unless temporal?
+
+        if new_record? && !(@validity_assigned || {}).key?(:valid_from)
+          errors.add(:valid_from, "must be explicitly assigned (nil means unbounded)")
+        end
+        Temporal.validate_interval!(valid_from, valid_to)
+      rescue ValidationError => e
+        errors.add(:valid_from, e.message)
+      end
 
       def validate_endpoints
         return unless new_record?

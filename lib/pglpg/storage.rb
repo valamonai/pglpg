@@ -60,7 +60,7 @@ module Pglpg
             source_id bigint NOT NULL REFERENCES #{n} (id) ON DELETE RESTRICT,
             target_id bigint NOT NULL REFERENCES #{n} (id) ON DELETE RESTRICT,
             properties jsonb NOT NULL DEFAULT '{}',
-            #{columns_sql(connection, type.edge_columns)}created_at timestamptz NOT NULL DEFAULT now(),
+            #{type.temporal? ? "valid_from date, valid_to date, " : ""}#{columns_sql(connection, type.edge_columns)}created_at timestamptz NOT NULL DEFAULT now(),
             updated_at timestamptz NOT NULL DEFAULT now(),
             CHECK (jsonb_typeof(properties) = 'object')
           )
@@ -92,8 +92,10 @@ module Pglpg
         end
       end
 
+      temporal_storage = type.temporal? || temporal_columns?(connection)
       type.edge_types.each_value do |t|
         is_type = "type = #{connection.quote(t.name.to_s)}"
+        list << [:check, edges_table, "validity_#{t.name}", temporal_check(connection, t)] if temporal_storage
         list << [:index, edges_table, "pair_#{t.name}", "ON #{e} (source_id, target_id) WHERE #{is_type}"] if t.unique_pair?
         if t.symmetric?
           # Canonical orientation, so a pair is stored one way only (ADR-0008).
@@ -123,6 +125,28 @@ module Pglpg
       connection.transaction(requires_new: true) { synchronize_constraints(connection) }
     end
 
+    # Acknowledges only the named temporal types. The caller supplies any
+    # backfill, on the same locked connection, after checks are installed.
+    def enable_temporal!(types:, backfill: nil, connection: graph.connection)
+      names = Array(types).map { type.edge_type!(_1) }.uniq
+      raise ArgumentError, "types: needs temporal edge types" if names.empty? || names.any? { !_1.temporal? }
+      raise ArgumentError, "backfill must be callable" if backfill && !backfill.respond_to?(:call)
+
+      connection.transaction(requires_new: true) do
+        lock_temporal_table(connection)
+        check_temporal_columns!(connection, allow_missing: true)
+        acknowledge_temporal!(connection, names.map(&:name))
+        existing = connection.columns(edges_table).map(&:name)
+        Temporal::NAMES.each do |name|
+          next if existing.include?(name.to_s)
+          connection.execute("ALTER TABLE #{q(connection, edges_table)} ADD COLUMN #{q(connection, name)} date")
+        end
+        synchronize_constraints(connection, acknowledged: names.map(&:name))
+        backfill.call(connection) if backfill
+        nil
+      end
+    end
+
     # Rewrites stored label sets to match the graph type.
     def relabel!(connection = graph.connection)
       return 0 if concrete_types.empty?
@@ -148,7 +172,12 @@ module Pglpg
 
     private
 
-    def synchronize_constraints(connection)
+    def synchronize_constraints(connection, acknowledged: [])
+      if type.temporal? || temporal_columns?(connection)
+        lock_temporal_table(connection)
+        check_temporal_columns!(connection)
+        acknowledge_temporal!(connection, acknowledged)
+      end
       wanted = constraints(connection)
       existing = existing_constraints(connection)
       (existing.keys - wanted.keys).each do |name|
@@ -160,7 +189,68 @@ module Pglpg
         end
       end
       (wanted.keys - existing.keys).each { connection.execute(wanted[_1][:sql]) }
+      wanted.each_key do |name|
+        next unless existing[name] && existing[name][:validated] == false
+        connection.execute("ALTER TABLE #{q(connection, existing[name][:table])} VALIDATE CONSTRAINT #{q(connection, name)}")
+      end
       nil
+    end
+
+    def lock_temporal_table(connection)
+      connection.execute("LOCK TABLE #{q(connection, edges_table)} IN ACCESS EXCLUSIVE MODE")
+    end
+
+    def temporal_columns?(connection)
+      return false unless connection.data_source_exists?(edges_table)
+      return false unless (connection.columns(edges_table).map(&:name) & Temporal::NAMES.map(&:to_s)).any?
+      return true if (type.edge_columns.keys & Temporal::NAMES).empty?
+
+      # Legacy application columns are allowed until explicitly migrated.
+      # Once metadata checks exist, redeclaring them as application columns
+      # must not silently bypass the temporal-disable transition.
+      existing_constraints(connection).values.any? do |info|
+        info[:table] == edges_table && Temporal::NAMES.all? { info[:definition]&.include?(_1.to_s) }
+      end
+    end
+
+    def check_temporal_columns!(connection, allow_missing: false)
+      if (type.edge_columns.keys & Temporal::NAMES).any?
+        raise TemporalMigrationRequired, "remove reserved validity metadata from application column declarations"
+      end
+      columns = connection.columns(edges_table).to_h { [_1.name, _1] }
+      Temporal::NAMES.each do |name|
+        column = columns[name.to_s]
+        if column.nil?
+          raise TemporalMigrationRequired, "run enable_temporal! to add #{name}" unless allow_missing
+        elsif column.type != :date || !column.null || column.default || column.default_function
+          raise TemporalMigrationRequired, "#{name} must be a nullable date column without a default; migrate incompatible columns explicitly"
+        end
+      end
+    end
+
+    def acknowledge_temporal!(connection, acknowledged)
+      existing = existing_constraints(connection)
+      type.edge_types.each_value do |t|
+        next unless t.temporal?
+        name = constraint_name(edges_table, "validity_#{t.name}", temporal_check(connection, t))
+        next if existing[name] && existing[name][:validated] != false
+        next if acknowledged.include?(t.name)
+        populated = connection.select_value("SELECT EXISTS (SELECT 1 FROM #{q(connection, edges_table)} WHERE type = #{connection.quote(t.name.to_s)})")
+        raise TemporalMigrationRequired, "acknowledge #{t.name} with enable_temporal!(types: [#{t.name.inspect}])" if populated
+      end
+    end
+
+    def temporal_check(connection, edge_type)
+      body = if edge_type.temporal?
+        checks = Temporal::NAMES.map do |name|
+          "(#{name} IS NULL OR #{name} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31')"
+        end
+        checks << "(valid_from IS NULL OR valid_to IS NULL OR valid_from < valid_to)"
+        checks.join(" AND ")
+      else
+        "valid_from IS NULL AND valid_to IS NULL"
+      end
+      "NOT (type = #{connection.quote(edge_type.name.to_s)}) OR (#{body})"
     end
 
     def type = graph.type
@@ -206,17 +296,17 @@ module Pglpg
     def existing_constraints(connection)
       prefixes = [nodes_table, edges_table].map { "pglpg\\_#{_1.gsub("_", "\\_")}\\_%" }
       rows = connection.select_rows(<<~SQL, "Pglpg constraints")
-        SELECT c.conname, 'check', t.relname FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+        SELECT c.conname, 'check', t.relname, c.convalidated, pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
         WHERE t.relname IN (#{connection.quote(nodes_table)}, #{connection.quote(edges_table)})
           AND t.relnamespace = to_regnamespace(current_schema())
           AND (c.conname LIKE #{connection.quote(prefixes[0])} OR c.conname LIKE #{connection.quote(prefixes[1])})
         UNION ALL
-        SELECT i.indexname, 'index', i.tablename FROM pg_indexes i
+        SELECT i.indexname, 'index', i.tablename, true, NULL FROM pg_indexes i
         WHERE i.tablename IN (#{connection.quote(nodes_table)}, #{connection.quote(edges_table)})
           AND i.schemaname = current_schema()
           AND (i.indexname LIKE #{connection.quote(prefixes[0])} OR i.indexname LIKE #{connection.quote(prefixes[1])})
       SQL
-      rows.to_h { |name, kind, table| [name, { kind: kind.to_sym, table: }] }
+      rows.to_h { |name, kind, table, validated, definition| [name, { kind: kind.to_sym, table:, validated:, definition: }] }
     end
   end
 end

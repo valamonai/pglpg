@@ -22,7 +22,7 @@
 # (rows, order, counts, exists?, first, pagination, lookups) is unchanged.
 # Execution time and timeouts are outside this guarantee.
 RSpec.shared_examples "a pglpg visibility policy" do
-  leak_graph = lambda do |visibility, columns|
+  leak_graph = lambda do |visibility, columns, temporal|
     Pglpg::Graph.define(:pglpg_leak, nodes_table: "pglpg_leak_nodes", edges_table: "pglpg_leak_edges",
                                      visibility:, write_policy: Pglpg::Testing::AllowAll,
                                      trusted_writer_allowed: ->(_context) { true }) do
@@ -43,12 +43,12 @@ RSpec.shared_examples "a pglpg visibility policy" do
         property :uid, :string, required: true
         key :uid
       end
-      edge :WORKS_ON, from: :Person, to: :Project do
+      edge :WORKS_ON, from: :Person, to: :Project, temporal: temporal do
         property :role, :string
       end
-      edge :BASED_AT, from: :Project, to: :Location
-      edge :KNOWS, from: :Person, to: :Person
-      edge :FRIEND, from: :Person, to: :Person, symmetric: true
+      edge :BASED_AT, from: :Project, to: :Location, temporal: temporal
+      edge :KNOWS, from: :Person, to: :Person, temporal: temporal
+      edge :FRIEND, from: :Person, to: :Person, symmetric: true, temporal: temporal
     end
   end
 
@@ -59,8 +59,11 @@ RSpec.shared_examples "a pglpg visibility policy" do
     end
   end
 
-  let(:pglpg_leak_graph) { leak_graph.call(pglpg_visibility, pglpg_columns) }
-  let(:pglpg_seed_graph) { leak_graph.call(Pglpg::Testing::SeeAll, pglpg_columns) }
+  # Optional: also exercise temporal validity with the application policy.
+  let(:pglpg_temporal) { false }
+
+  let(:pglpg_leak_graph) { leak_graph.call(pglpg_visibility, pglpg_columns, pglpg_temporal) }
+  let(:pglpg_seed_graph) { leak_graph.call(Pglpg::Testing::SeeAll, pglpg_columns, pglpg_temporal) }
 
   it "keeps every observation unchanged when hidden data is added" do
     pglpg_leak_graph.storage.create!
@@ -69,7 +72,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
     hid = pglpg_hidden_attrs
     person = ->(uid, name, rank, attrs) { seed.insert_node(:Person, properties: { uid:, name:, rank:, namespace: attrs == hid ? "hidden" : "visible" }, attrs:) }
     node = ->(type, uid, attrs, **props) { seed.insert_node(type, properties: { uid:, **props }, attrs:) }
-    edge = ->(type, from, to, attrs, **props) { seed.insert_edge(type, from:, to:, properties: props, attrs:) }
+    edge = ->(type, from, to, attrs, **props) { seed.insert_edge(type, from:, to:, properties: props, attrs:, **(pglpg_temporal ? { valid_from: nil } : {})) }
 
     # Created first, so it has the smallest id: symmetric edges to it are
     # stored with the hidden node in the source column.
@@ -92,7 +95,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
     ]
     visible_refs = [p1, p2, p3, j1, j2, l1, *visible_edges]
 
-    ctx = pglpg_leak_graph.for(viewer: pglpg_viewer)
+    ctx = pglpg_leak_graph.for(viewer: pglpg_viewer, **(pglpg_temporal ? { as_of: Date.new(2020, 6, 1) } : {}))
     before = Pglpg::Testing.observe(ctx, visible_refs)
     # Three visible People plus two visible Projects in this fixture.
     raise "lazy association observations are missing" unless before.keys.count { _1.to_s.start_with?("assoc_") } == 5
@@ -126,6 +129,16 @@ RSpec.shared_examples "a pglpg visibility policy" do
       # hidden edge between hidden nodes
       edge.(:KNOWS, h1, h2, hid)
     ]
+
+    if pglpg_temporal
+      # Visible but ineligible edges must be just as unobservable as hidden
+      # data, including expired shortcuts and a disjoint-time bridge.
+      [[p1, p3], [p3, p2]].each do |from, to|
+        hidden_refs << seed.insert_edge(:KNOWS, from:, to:, attrs: vis, valid_from: nil, valid_to: Date.new(2020, 6, 1))
+      end
+      hidden_refs << seed.insert_edge(:FRIEND, from: p1, to: p3, attrs: vis, valid_from: Date.new(2020, 6, 2))
+      hidden_refs << seed.insert_edge(:WORKS_ON, from: p1, to: j2, attrs: vis, valid_from: nil, valid_to: Date.new(2020, 6, 1))
+    end
 
     after = Pglpg::Testing.observe(ctx, visible_refs)
     before.each_key { |name| expect(after[name]).to eq(before[name]), "observation #{name} changed" }

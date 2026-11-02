@@ -116,8 +116,8 @@ module Pglpg
         attrs: decode_attrs(type.edge_columns, row),
         created_at: Time.iso8601(row["created_at"]), updated_at: Time.iso8601(row["updated_at"]),
         temporal: edge_type&.temporal? || false,
-        valid_from: row["valid_from"] && Date.iso8601(row["valid_from"], Date::GREGORIAN).freeze,
-        valid_to: row["valid_to"] && Date.iso8601(row["valid_to"], Date::GREGORIAN).freeze,
+        valid_from: edge_type&.temporal? && row["valid_from"] ? Date.iso8601(row["valid_from"], Date::GREGORIAN).freeze : nil,
+        valid_to: edge_type&.temporal? && row["valid_to"] ? Date.iso8601(row["valid_to"], Date::GREGORIAN).freeze : nil,
         symmetric: edge_type&.symmetric? || false
       )
     end

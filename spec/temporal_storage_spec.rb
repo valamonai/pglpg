@@ -106,12 +106,59 @@ RSpec.describe "explicit temporal storage transitions" do
     expect { plain.storage.sync_constraints! }.not_to(change { checks(plain) })
   end
 
+  it "fails before the callback when existing intervals fail the new check" do
+    g = schema(temporal: [:T])
+    g.storage.create!
+    writer = g.for(viewer: Viewer.new(4))
+    a = writer.insert_node(:P, attrs: { classification: 1 })
+    ref = writer.insert_edge(:T, from: a, to: a, valid_from: nil, attrs: { classification: 1 })
+    name = checks(g).find { _1.include?("validity_T") }
+    g.connection.execute("ALTER TABLE temporal_migration_edges DROP CONSTRAINT #{g.connection.quote_column_name(name)}")
+    g.connection.execute("UPDATE temporal_migration_edges SET valid_from = DATE '10000-01-01' WHERE id = #{ref.id}")
+    called = false
+    expect { g.storage.enable_temporal!(types: [:T], backfill: ->(_) { called = true }) }.to raise_error(ActiveRecord::StatementInvalid)
+    expect(called).to be(false)
+    expect(checks(g)).not_to include(name)
+    expect(g.connection.select_value("SELECT 1")).to eq(1)
+  end
+
+  it "cannot bypass the disable check by redeclaring metadata as application columns" do
+    g = schema(temporal: [:T])
+    g.storage.create!
+    redefined = Pglpg::Graph.define(:temporal_migration) do
+      column :classification, :integer
+      edge_column :valid_from, :date
+      edge_column :valid_to, :date
+      node :P
+      edge :T, from: :P, to: :P
+      edge :U, from: :P, to: :P
+    end
+    expect { redefined.storage.sync_constraints! }.to raise_error(Pglpg::TemporalMigrationRequired, /application column declarations/)
+  end
+
   it "refuses incompatible legacy bound columns without casting timestamps" do
     old = schema
     old.storage.create!
     old.connection.execute("ALTER TABLE temporal_migration_edges ADD COLUMN valid_from timestamp")
     expect { schema(temporal: [:T]).storage.enable_temporal!(types: [:T]) }.to raise_error(Pglpg::TemporalMigrationRequired, /nullable date/)
     expect(old.connection.columns(old.edges_table).find { _1.name == "valid_from" }.type).to eq(:datetime)
+  end
+
+  it "does not reinterpret legacy application date columns as metadata on timeless edge values" do
+    g = Pglpg::Graph.define(:legacy_validity) do
+      column :classification, :integer
+      edge_column :valid_from, :datetime
+      node :P
+      edge :N, from: :P, to: :P
+    end
+    g.storage.create!
+    context = g.for(viewer: Viewer.new(4))
+    a = context.insert_node(:P, attrs: { classification: 1 })
+    time = Time.utc(2020, 6, 1, 12)
+    ref = context.insert_edge(:N, from: a, to: a, attrs: { classification: 1, valid_from: time })
+    value = context.find(ref)
+    expect([value.temporal?, value.valid_from, value.valid_to]).to eq([false, nil, nil])
+    expect(value.attrs[:valid_from]).to eq(time)
   end
 
   it "can roll back successful enablement with the outer transaction" do

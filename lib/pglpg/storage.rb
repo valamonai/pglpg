@@ -201,13 +201,22 @@ module Pglpg
     end
 
     def temporal_columns?(connection)
-      return false if (type.edge_columns.keys & Temporal::NAMES).any?
       return false unless connection.data_source_exists?(edges_table)
+      return false unless (connection.columns(edges_table).map(&:name) & Temporal::NAMES.map(&:to_s)).any?
+      return true if (type.edge_columns.keys & Temporal::NAMES).empty?
 
-      (connection.columns(edges_table).map(&:name) & Temporal::NAMES.map(&:to_s)).any?
+      # Legacy application columns are allowed until explicitly migrated.
+      # Once metadata checks exist, redeclaring them as application columns
+      # must not silently bypass the temporal-disable transition.
+      existing_constraints(connection).values.any? do |info|
+        info[:table] == edges_table && Temporal::NAMES.all? { info[:definition]&.include?(_1.to_s) }
+      end
     end
 
     def check_temporal_columns!(connection, allow_missing: false)
+      if (type.edge_columns.keys & Temporal::NAMES).any?
+        raise TemporalMigrationRequired, "remove reserved validity metadata from application column declarations"
+      end
       columns = connection.columns(edges_table).to_h { [_1.name, _1] }
       Temporal::NAMES.each do |name|
         column = columns[name.to_s]
@@ -287,17 +296,17 @@ module Pglpg
     def existing_constraints(connection)
       prefixes = [nodes_table, edges_table].map { "pglpg\\_#{_1.gsub("_", "\\_")}\\_%" }
       rows = connection.select_rows(<<~SQL, "Pglpg constraints")
-        SELECT c.conname, 'check', t.relname, c.convalidated FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+        SELECT c.conname, 'check', t.relname, c.convalidated, pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
         WHERE t.relname IN (#{connection.quote(nodes_table)}, #{connection.quote(edges_table)})
           AND t.relnamespace = to_regnamespace(current_schema())
           AND (c.conname LIKE #{connection.quote(prefixes[0])} OR c.conname LIKE #{connection.quote(prefixes[1])})
         UNION ALL
-        SELECT i.indexname, 'index', i.tablename, true FROM pg_indexes i
+        SELECT i.indexname, 'index', i.tablename, true, NULL FROM pg_indexes i
         WHERE i.tablename IN (#{connection.quote(nodes_table)}, #{connection.quote(edges_table)})
           AND i.schemaname = current_schema()
           AND (i.indexname LIKE #{connection.quote(prefixes[0])} OR i.indexname LIKE #{connection.quote(prefixes[1])})
       SQL
-      rows.to_h { |name, kind, table, validated| [name, { kind: kind.to_sym, table:, validated: }] }
+      rows.to_h { |name, kind, table, validated, definition| [name, { kind: kind.to_sym, table:, validated:, definition: }] }
     end
   end
 end

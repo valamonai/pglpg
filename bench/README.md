@@ -226,3 +226,33 @@ expression GiST over daterange. A rolled-back batch of 1,000 raw inserts measure
 index maintenance separately; it does not measure authorization or Ruby writer
 throughput. No new default index follows from a single winning cell. Review
 latency, buffers, read shape, added bytes and write cost together.
+
+### Retained local evidence — 2026-11-02
+
+[Summary](evidence/temporal-2026-11-02.json) and
+[checksummed results/plans archive](evidence/temporal-2026-11-02.tar.gz) retain
+measurements of code `a421de25cc36cf13a2af92556665ee81b80caa5d`, compared with
+v0.2.0 `4439cfdb3e79ac849c97eb3d294b248fb3161fd8`. Ruby 4.0.6, ActiveRecord
+8.1.4, PostgreSQL 18.6 on a warm local database. Later evidence-only commits do
+not change the measured library; the reports also record its content digest.
+
+The ordinary CI fixture gate/self-test and strict ordinary 1m baseline gate
+passed. Every temporal result fingerprint matched the equivalent-policy
+reference for all 40 cells in each of four configurations on both 1m and
+hub-heavy. The archive includes samples, per-start identities, plans, index
+sizes, raw batch costs and manifests; library-location fields alone are
+normalized to repository-relative paths.
+
+| Configuration | 1m dated 3-hop hub L4 p95 ms | Hub-heavy dated 3-hop hub L4 p95 ms | Added hub-heavy index MiB | Hub-heavy raw 1000-insert p95 ms |
+|---|---:|---:|---:|---:|
+| Endpoint (existing) | 10.807 | 36.552 | 0 | 5.145 |
+| Composite | 10.061 | 35.015 | 146.35 | 6.822 |
+| Covering | 10.250 | 35.210 | 138.95 | 6.662 |
+| GiST | 10.989 | 45.545 | 32.43 | 6.875 |
+
+Keep existing endpoint indexes as the default. Some undated hub cells improve
+with added btrees, but the dated gains here are small and shape-dependent,
+with additional storage/write costs. GiST does not give a broad win. These are
+small warm single-client experiments with one active-date distribution, not a
+managed-plan SLA, write-throughput claim or the deferred pre-1.0 acceptance.
+No existing benchmark bound was loosened.

@@ -84,7 +84,11 @@ module Pglpg
       Writer.new(self, trusted: true)
     end
 
-    def inspect = "#<Pglpg::Context #{graph.name} viewer=#{viewer.inspect}>"
+    def inspect
+      value = as_of.instance_of?(Date) ? as_of.iso8601 : as_of.inspect
+      mode = " as_of=#{value}" unless as_of.nil?
+      "#<Pglpg::Context #{graph.name} viewer=#{viewer.inspect}#{mode}>"
+    end
 
     def writable!
       raise ReadOnlyContext, "dated contexts are read-only" if as_of.instance_of?(Date)

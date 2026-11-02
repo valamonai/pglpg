@@ -222,6 +222,15 @@ reconstruct old values, node existence or past permissions.
 `unique: :pair` still spans all dates. Leave/rejoin episodes with a gap need
 separate Refs on a non-pair-unique type; overlaps are allowed.
 
+Run the temporal migration before routing dated reads or temporal writes to the
+updated graph declaration. Loading `temporal: true` does not migrate its tables.
+During a deploy-then-migrate window, keep temporal edge operations disabled
+until the migration commits. Storage helpers report `TemporalMigrationRequired`;
+ordinary reads/writes do not inspect the catalog, so unmigrated operations may
+raise `ActiveRecord::StatementInvalid` with `PG::UndefinedColumn` instead.
+An explicit `:any` read can still work without date columns and does not prove
+that the migration is complete.
+
 For existing tables, remove conflicting application declarations and migrate
 incompatible legacy timestamp columns explicitly before enabling temporal types:
 
@@ -238,7 +247,11 @@ constraint sync/backfill atomically. An outer transaction keeps its work pending
 until commit. Callback errors or invalid intervals roll everything back; the
 callback must not commit or switch connections. Callback idempotency is yours.
 Bare `sync_constraints!` refuses missing columns or unacknowledged populated
-temporal types. Physical columns remain after temporal types are disabled.
+temporal types. Once temporal columns exist, every synchronization takes an
+`ACCESS EXCLUSIVE` edge-table lock, including after the last temporal type is
+disabled and for unrelated schema changes. This blocks edge reads and writes
+until the caller's outer commit; keep the migration transaction short and
+schedule it accordingly. Physical columns remain after temporal types are disabled.
 See [ADR-0013](https://knowen.md/nodes/36532) for the complete contract.
 
 ## Leak specs for your policy

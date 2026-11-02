@@ -21,6 +21,7 @@
 
 ### Added
 
+- Context inspection shows an explicitly selected Date or `:any` read mode.
 - Opt-in `temporal: true` edge types (ADR-0013): exact Date metadata,
   half-open `[valid_from, valid_to)` intervals, nil unbounded, finite dates
   0001-01-01 through 9999-12-31. DateTime, Time and String are rejected.

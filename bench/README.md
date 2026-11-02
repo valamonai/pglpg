@@ -256,3 +256,11 @@ with additional storage/write costs. GiST does not give a broad win. These are
 small warm single-client experiments with one active-date distribution, not a
 managed-plan SLA, write-throughput claim or the deferred pre-1.0 acceptance.
 No existing benchmark bound was loosened.
+
+The compressed evidence archive is deliberately retained in git: ordinary
+Actions artifacts expire after 90 days, and no release asset has been published
+for this unreleased feature. Keeping the exact samples and plans with the
+reviewed commit makes the evidence durable without an external storage
+lifecycle. Use the adjacent JSON summary and the table above for review;
+extract the archive for per-cell plans. The archive is excluded from the gem.
+Its size is an intentional repository-history cost, not a runtime dependency.

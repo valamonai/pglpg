@@ -8,8 +8,8 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.2.0 release candidate.** Publication awaits the
-[release gate](https://knowen.md/nodes/36368) and maintainer review. The design and its decisions live in the
+Status: **0.3 development (unreleased).** The latest tagged version is 0.2.0.
+The temporal API below is available on this development branch. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
@@ -188,6 +188,58 @@ learning occupancy in that scope, including hidden collisions, without granting
 row access. Scope and key are immutable. Existing data needs a transactional
 backfill and constraint migration; see the
 [API contract](https://knowen.md/nodes/36329).
+
+## Temporal edges (0.3, unreleased)
+
+Opt in per edge type and use one date across the whole query:
+
+```ruby
+edge :MEMBER_OF, from: :Person, to: :Organization, temporal: true
+
+w = Kg.for(viewer: current_viewer)
+w.insert_edge(:MEMBER_OF, from: ann, to: org,
+              valid_from: Date.new(2020, 1, 1), valid_to: Date.new(2021, 1, 1),
+              attrs: { classification: 1 })
+
+at = Kg.for(viewer: current_viewer, as_of: Date.new(2020, 6, 1))
+at.match.node(:p, ref: ann).out(:MEMBER_OF, :o).to_a
+all_dates = Kg.for(viewer: current_viewer, as_of: :any)
+```
+
+Intervals include the start and exclude the end. Bounds are exact Ruby Dates
+in 0001–9999 or nil for unbounded; unknown/uncertain dates need separate
+application metadata. Required `valid_from:` presence on insert/upsert makes
+all-time intent explicit (`valid_from: nil`). Updates preserve omitted bounds;
+upserts preserve an omitted `valid_to` on conflict but use nil on insert.
+
+Date contexts are read-only, including model saves. Omitting `as_of` permits
+node-only and timeless-only reads; temporal reads raise `TemporalModeRequired`.
+Generic edge `find(ref)` requires a mode whenever the schema has a temporal
+type. `:any` remains writable and always retains current visibility. Dated
+reachability, models and preloads use the same date on every hop. This does not
+reconstruct old values, node existence or past permissions.
+
+`unique: :pair` still spans all dates. Leave/rejoin episodes with a gap need
+separate Refs on a non-pair-unique type; overlaps are allowed.
+
+For existing tables, remove conflicting application declarations and migrate
+incompatible legacy timestamp columns explicitly before enabling temporal types:
+
+```ruby
+Kg.storage.enable_temporal!(types: [:MEMBER_OF], backfill: ->(connection) {
+  # Explicit application backfill, on this connection, after checks are enabled.
+  # Without a callback, existing bounds are preserved; newly added NULL bounds
+  # deliberately mean all-time. Never invent dates or silently discard times.
+})
+```
+
+The helper locks the edge table, adds missing nullable date columns and runs
+constraint sync/backfill atomically. An outer transaction keeps its work pending
+until commit. Callback errors or invalid intervals roll everything back; the
+callback must not commit or switch connections. Callback idempotency is yours.
+Bare `sync_constraints!` refuses missing columns or unacknowledged populated
+temporal types. Physical columns remain after temporal types are disabled.
+See [ADR-0013](https://knowen.md/nodes/36532) for the complete contract.
 
 ## Leak specs for your policy
 

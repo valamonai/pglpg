@@ -13,6 +13,17 @@ RSpec.describe "visibility leak suite" do
     end
   end
 
+  context "with dated temporal edges" do
+    it_behaves_like "a pglpg visibility policy" do
+      let(:pglpg_temporal) { true }
+      let(:pglpg_visibility) { ClearancePolicy }
+      let(:pglpg_viewer) { Viewer.new(2) }
+      let(:pglpg_columns) { { classification: [:integer, { null: false }] } }
+      let(:pglpg_visible_attrs) { { classification: 2 } }
+      let(:pglpg_hidden_attrs) { { classification: 3 } }
+    end
+  end
+
   # The suite stays within an application's smaller row cap.
   context "with max_rows 6" do
     before { Pglpg.configuration.max_rows = 6 }

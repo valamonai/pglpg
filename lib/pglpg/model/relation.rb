@@ -99,10 +99,16 @@ module Pglpg
 
       # Builds and saves a record; returns it, saved or not (check
       # persisted? or errors).
-      def create(writer: nil, **attributes) = new(**attributes).tap { _1.save(writer:) }
+      def create(writer: nil, **attributes)
+        context.writable!
+        new(**attributes).tap { _1.save(writer:) }
+      end
 
       # As #create, but raises RecordInvalid when validation fails.
-      def create!(writer: nil, **attributes) = new(**attributes).tap { _1.save!(writer:) }
+      def create!(writer: nil, **attributes)
+        context.writable!
+        new(**attributes).tap { _1.save!(writer:) }
+      end
 
       # The compiled Pglpg::Query, for debugging (to_sql, explain).
       def to_query = compiled
@@ -148,6 +154,7 @@ module Pglpg
         tree.each do |name, children|
           association = owner_model.respond_to?(:associations) && owner_model.associations[name]
           raise ArgumentError, "#{owner_model} has no association #{name}" unless association
+          context.temporal_mode!([context.graph.type.edge_type!(association.edge_type)])
           validate_tree(target_model(owner_model, association), children)
         end
       end

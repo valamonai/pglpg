@@ -189,3 +189,40 @@ Before anything is timed, the script checks that all three return identical resu
 | `REACH_BUFFER_SAMPLES` | `30` | Starts measured with `EXPLAIN` |
 | `REACH_TIMEOUT_MS` | `10000` | Statement timeout |
 | `REACH_NO_PARALLEL` | unset | `1` disables parallel workers |
+
+## Temporal experiment (ADR-0013, 0.3)
+
+`temporal.rb` is separate from the ordinary regression manifest and gates.
+Use a dedicated disposable benchmark database. `--load` replaces its synthetic
+bench tables. It adds date metadata through the migration helper and assigns
+33% active intervals, with the remainder split into expired and future
+intervals. `--active-percent 1..99` changes that mix. The existing visibility
+policy remains on every node and edge; OCCURRED_AT stays timeless.
+
+```bash
+PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --load --out tmp/bench/temporal-1m
+PGLPG_LIB=/absolute/path/to/v0.2.0/lib PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --baseline --out tmp/bench/temporal-reference
+PGLPG_BENCH_DATABASE_URL=postgres:///pglpg_temporal_bench bundle exec ruby bench/temporal.rb --fixture 1m --compare tmp/bench/temporal-reference --out tmp/bench/temporal-candidate
+```
+
+The reference uses the old library with an equivalent validity-aware policy:
+it tests compiler/result parity on identical data, not temporal API support in
+0.2. It never loads or alters data. Comparison fails closed on missing reference
+cells or different per-start identity/depth/completeness fingerprints. It does
+not establish managed-plan acceptance or replace the ordinary strict baseline
+gates. Run 1m and hub-heavy separately; preserve each reference before loading
+another fixture. The same commands accept `--fixture ci` for a small smoke run.
+
+Forty cells cover dated and explicit-any reads, two clearances, fixed paths,
+incoming/symmetric paths, hubs and bounded reachability. Each configuration runs
+warmups and 30 public-API timed samples per cell (override TEMPORAL_BENCH_RUNS),
+then separate bound-SQL JSON plans from up to three starts. It refuses empty
+workloads or result changes. Results retain library digest/runtime/manifest,
+samples, fingerprints, buffers, index sizes and plans.
+
+Configurations retain the original endpoint traversal indexes, then separately
+add endpoint-first composite btrees, endpoint-first covering btrees, or a partial
+expression GiST over daterange. A rolled-back batch of 1,000 raw inserts measures
+index maintenance separately; it does not measure authorization or Ruby writer
+throughput. No new default index follows from a single winning cell. Review
+latency, buffers, read shape, added bytes and write cost together.

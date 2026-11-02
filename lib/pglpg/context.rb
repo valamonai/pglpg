@@ -4,11 +4,12 @@ module Pglpg
   # A graph seen by one viewer. Created by Graph#for; immutable. Every query
   # and write built from it applies the graph's policies for this viewer.
   class Context
-    attr_reader :graph, :viewer
+    attr_reader :graph, :viewer, :as_of
 
-    def initialize(graph, viewer)
+    def initialize(graph, viewer, as_of: nil)
       @graph = graph
       @viewer = viewer
+      @as_of = as_of.equal?(:any) ? :any : Temporal.date(as_of, error: ArgumentError)
       freeze
     end
 
@@ -23,6 +24,7 @@ module Pglpg
       graph.check_ref!(ref, ref.kind)
       return match.node(:n, ref:).first&.fetch(:n) if ref.node?
 
+      temporal_mode!(graph.type.edge_types.values)
       sql = Sql.new(graph.connection)
       e = "e"
       sql << "SELECT to_jsonb(e) AS e FROM " << table_sql(graph.edges_table) << " AS e"
@@ -33,6 +35,7 @@ module Pglpg
       sql << " WHERE e.id = "
       sql.bind(ref.id, "bigint") << " AND "
       append_edge_visible(sql, e)
+      append_temporal(sql, e, graph.type.edge_types.values)
       row = read(sql).first
       row && graph.build_edge(JSON.parse(row["e"]))
     end
@@ -63,9 +66,9 @@ module Pglpg
 
     def update_node(ref, properties: {}, attrs: {}) = writer.update_node(ref, properties:, attrs:)
 
-    def insert_edge(type, from:, to:, properties: {}, attrs: {}) = writer.insert_edge(type, from:, to:, properties:, attrs:)
+    def insert_edge(type, from:, to:, properties: {}, attrs: {}, **validity) = writer.insert_edge(type, from:, to:, properties:, attrs:, **validity)
 
-    def update_edge(ref, properties: {}, attrs: {}) = writer.update_edge(ref, properties:, attrs:)
+    def update_edge(ref, properties: {}, attrs: {}, **validity) = writer.update_edge(ref, properties:, attrs:, **validity)
 
     def delete_edge(ref) = writer.delete_edge(ref)
 
@@ -74,6 +77,7 @@ module Pglpg
     # callable approves this context. It does not bypass validation, the
     # write policy or endpoint checks.
     def trusted_writer
+      writable!
       allowed = graph.trusted_writer_allowed
       raise NotTrusted, "trusted writer not granted" unless allowed.respond_to?(:call) && allowed.call(self) == true
 
@@ -81,6 +85,31 @@ module Pglpg
     end
 
     def inspect = "#<Pglpg::Context #{graph.name} viewer=#{viewer.inspect}>"
+
+    def writable!
+      raise ReadOnlyContext, "dated contexts are read-only" if as_of.instance_of?(Date)
+    end
+
+    def temporal_mode!(types)
+      if as_of.nil? && types.any?(&:temporal?)
+        raise TemporalModeRequired, "temporal reads require as_of: Date or :any"
+      end
+    end
+
+    # Appended alongside visibility, before every join/expansion/terminal.
+    def append_temporal(sql, name, types)
+      temporal_mode!(types)
+      temporal = types.select(&:temporal?)
+      return unless as_of.instance_of?(Date) && temporal.any?
+
+      sql << " AND ("
+      if temporal.size != types.size
+        sql << name << ".type <> ALL("
+        sql.bind_text_array(temporal.map(&:name)) << ") OR "
+      end
+      sql << "daterange(" << name << ".valid_from, " << name << ".valid_to, '[)') @> "
+      sql.bind(as_of.iso8601, "date") << ")"
+    end
 
     # -- internal ------------------------------------------------------------
 

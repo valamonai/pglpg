@@ -13,7 +13,8 @@ module Pglpg
 
       def initialize(name, from:, to:, unique: nil, symmetric: false, allow_self_loops: false, temporal: false)
         super(name)
-        raise SchemaError, "temporal edge types are planned for 0.3 (#{name})" if temporal
+        raise SchemaError, "temporal: must be true or false" unless [true, false].include?(temporal)
+        @temporal = temporal
         raise SchemaError, "unique: must be nil or :pair (#{name})" unless [nil, :pair].include?(unique)
         raise SchemaError, "allow_self_loops: needs symmetric: true (#{name})" if allow_self_loops && !symmetric
 
@@ -27,6 +28,8 @@ module Pglpg
       # At most one edge of this type between the same source and target
       # (the same unordered pair, for a symmetric type).
       def unique_pair? = unique == :pair
+
+      def temporal? = @temporal
 
       def symmetric? = @symmetric
 

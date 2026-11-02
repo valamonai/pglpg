@@ -41,8 +41,8 @@ module Pglpg
 
     # The only entry point for queries and writes. The returned context is
     # immutable and carries the viewer to everything built from it.
-    def for(viewer:)
-      Context.new(self, viewer)
+    def for(viewer:, as_of: nil)
+      Context.new(self, viewer, as_of:)
     end
 
     def ref(kind, id) = Ref.new(graph: name, kind:, id:)
@@ -115,6 +115,9 @@ module Pglpg
         properties: edge_type ? edge_type.decode_properties(row["properties"]) : row["properties"].transform_keys(&:to_sym).freeze,
         attrs: decode_attrs(type.edge_columns, row),
         created_at: Time.iso8601(row["created_at"]), updated_at: Time.iso8601(row["updated_at"]),
+        temporal: edge_type&.temporal? || false,
+        valid_from: row["valid_from"] && Date.iso8601(row["valid_from"], Date::GREGORIAN).freeze,
+        valid_to: row["valid_to"] && Date.iso8601(row["valid_to"], Date::GREGORIAN).freeze,
         symmetric: edge_type&.symmetric? || false
       )
     end

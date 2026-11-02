@@ -246,6 +246,7 @@ module Pglpg
         raise ArgumentError, "with distinct, order only by returned variables (not #{stray.join(", ")})"
       end
 
+      context.temporal_mode!(@state.edges.map { context.graph.type.edge_type!(_1.type) })
       names = aliases
       sql = Sql.new(context.graph.connection)
       inner = kind != :rows
@@ -322,6 +323,7 @@ module Pglpg
         sql.bind(edge.type.to_s, "text")
         sql << " AND "
         context.append_edge_visible(sql, e)
+        context.append_temporal(sql, e, [context.graph.type.edge_type!(edge.type)])
         conditions_sql(sql, edge.var, e)
         # Different edges (the GQL default match mode).
         @state.edges.first(i).each do |other|

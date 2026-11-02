@@ -11,7 +11,7 @@ module Pglpg
   # Scope-wide occupancy permission, distinct from write or read access.
   KeyScopeRequest = Data.define(:context, :domain, :scope)
 
-  WriteRequest = Data.define(:viewer, :operation, :type, :target, :from, :to, :key, :properties, :attrs, :trusted)
+  WriteRequest = Data.define(:viewer, :operation, :type, :target, :from, :to, :key, :properties, :attrs, :trusted, :validity, :validity_supplied)
 
   # Compiles writes into single statements. Visibility of the existing row,
   # the policy's conditions on it and endpoint checks all run inside the
@@ -21,6 +21,7 @@ module Pglpg
     attr_reader :context
 
     def initialize(context, trusted:)
+      context.writable!
       @context = context
       @graph = context.graph
       @trusted = trusted
@@ -126,32 +127,35 @@ module Pglpg
       true
     end
 
-    def insert_edge(type, from:, to:, properties: {}, attrs: {})
+    def insert_edge(type, from:, to:, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
       edge_type = @graph.type.edge_type!(type)
       if edge_type.unique_pair? && !@trusted
         raise ArgumentError, "#{edge_type.name} is unique per pair; write it through the trusted writer"
       end
 
-      write_edge(:insert_edge, edge_type, from, to, properties, attrs)
+      write_edge(:insert_edge, edge_type, from, to, properties, attrs, valid_from, valid_to)
     end
 
     # Trusted only, for edge types declared unique: :pair.
-    def upsert_edge(type, from:, to:, properties: {}, attrs: {})
+    def upsert_edge(type, from:, to:, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
       trusted!(:upsert_edge)
       edge_type = @graph.type.edge_type!(type)
       raise ArgumentError, "#{edge_type.name} is not unique per pair; use insert_edge" unless edge_type.unique_pair?
 
-      write_edge(:upsert_edge, edge_type, from, to, properties, attrs)
+      write_edge(:upsert_edge, edge_type, from, to, properties, attrs, valid_from, valid_to)
     end
 
-    def update_edge(ref, properties: {}, attrs: {})
+    def update_edge(ref, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
       @graph.check_ref!(ref, :edge)
-      edge = @context.find(ref) or raise WriteRejected
+      edge = @graph.for(viewer: @context.viewer, as_of: :any).find(ref) or raise WriteRejected
       edge_type = @graph.type.edge_type!(edge.type)
+      validity = Temporal.bounds(edge_type, valid_from, valid_to)
+      Temporal.validate_interval!(validity.fetch(:valid_from, edge.valid_from), validity.fetch(:valid_to, edge.valid_to))
       props = properties.transform_keys(&:to_sym)
       json = edge_type.encode_properties(props, partial: true)
       cols = encode_attrs(@graph.type.edge_columns, attrs, insert: false)
-      request = authorize!(:update_edge, edge_type.name, target: ref, properties: props, attrs:)
+      cols += validity_columns(validity)
+      request = authorize!(:update_edge, edge_type.name, target: ref, properties: props, attrs:, validity:)
 
       sql = new_sql
       sql << "UPDATE " << table(@graph.edges_table) << " AS tgt SET "
@@ -165,7 +169,7 @@ module Pglpg
 
     def delete_edge(ref)
       @graph.check_ref!(ref, :edge)
-      edge = @context.find(ref) or raise WriteRejected
+      edge = @graph.for(viewer: @context.viewer, as_of: :any).find(ref) or raise WriteRejected
       request = authorize!(:delete_edge, edge.type, target: ref)
 
       sql = new_sql
@@ -179,7 +183,8 @@ module Pglpg
 
     private
 
-    def write_edge(operation, edge_type, from, to, properties, attrs)
+    def write_edge(operation, edge_type, from, to, properties, attrs, valid_from, valid_to)
+      validity = Temporal.bounds(edge_type, valid_from, valid_to, required: true)
       @graph.check_ref!(from, :node)
       @graph.check_ref!(to, :node)
       if edge_type.symmetric?
@@ -193,7 +198,9 @@ module Pglpg
       props = properties.transform_keys(&:to_sym)
       json = edge_type.encode_properties(props)
       cols = encode_attrs(@graph.type.edge_columns, attrs, insert: true)
-      request = authorize!(operation, edge_type.name, from:, to:, properties: props, attrs:)
+      update_cols = cols + validity_columns(validity)
+      cols += validity_columns(edge_type.temporal? ? { valid_from: nil, valid_to: nil }.merge(validity) : {})
+      request = authorize!(operation, edge_type.name, from:, to:, properties: props, attrs:, validity:)
 
       sql = new_sql
       sql << "INSERT INTO " << table(@graph.edges_table) << " AS tgt (type, source_id, target_id, properties"
@@ -224,7 +231,7 @@ module Pglpg
         sql << " ON CONFLICT (source_id, target_id) WHERE type = "
         sql.literal(edge_type.name) << " DO UPDATE SET "
         set_properties(sql, "tgt.properties", json, null_keys(props), excluded: true)
-        set_columns(sql, cols, excluded: true)
+        set_columns(sql, update_cols, excluded: true)
         sql << " WHERE "
         existing_row(sql, :edge, request)
       end
@@ -300,12 +307,17 @@ module Pglpg
       end
     end
 
+    def validity_columns(validity)
+      validity.map { |name, value| [Schema::Column.new(name, :date), value&.iso8601] }
+    end
+
     def null_keys(props) = props.select { |_, v| v.nil? }.keys.map(&:to_s)
 
-    def authorize!(operation, type, target: nil, from: nil, to: nil, key: nil, properties: {}, attrs: {})
+    def authorize!(operation, type, target: nil, from: nil, to: nil, key: nil, properties: {}, attrs: {}, validity: {}.freeze)
       request = WriteRequest.new(viewer: @context.viewer, operation:, type: type.to_sym, target:, from:, to:, key:,
                                  properties: properties.freeze, attrs: attrs.transform_keys(&:to_sym).freeze,
-                                 trusted: @trusted)
+                                 trusted: @trusted, validity:,
+                                 validity_supplied: Temporal::NAMES.to_h { [_1, validity.key?(_1)] }.freeze)
       raise WriteRejected unless @graph.write_policy.authorize?(request) == true
 
       request
@@ -348,7 +360,7 @@ module Pglpg
     rescue ActiveRecord::StatementInvalid => e
       case e.cause
       when PG::UniqueViolation, PG::ForeignKeyViolation, PG::RestrictViolation then raise WriteRejected, cause: nil
-      when PG::NotNullViolation, PG::CheckViolation then raise ValidationError, e.message
+      when PG::NotNullViolation, PG::CheckViolation then raise ValidationError, "write violates schema constraints", cause: nil
       else raise
       end
     end

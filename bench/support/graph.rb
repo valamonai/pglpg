@@ -13,8 +13,8 @@ module BenchGraph
 
   CLEARANCES = [2, 4].freeze
 
-  def self.define
-    Pglpg::Graph.define(:bench, visibility: Policy) do
+  def self.define(temporal: false, visibility: Policy)
+    Pglpg::Graph.define(:bench, visibility: visibility) do
       column :classification, :integer, null: false, covering: true
       node(:Person) do
         property :uid, :string, required: true
@@ -24,11 +24,11 @@ module BenchGraph
       node(:Incident) { property :severity, :integer }
       node(:Location) { property :name, :string }
       node(:Organization) { property :name, :string }
-      edge :KNOWS, from: :Person, to: :Person
-      edge :INVOLVED_IN, from: :Person, to: :Incident
+      edge :KNOWS, from: :Person, to: :Person, temporal: temporal
+      edge :INVOLVED_IN, from: :Person, to: :Incident, temporal: temporal
       edge :OCCURRED_AT, from: :Incident, to: :Location
-      edge :MEMBER_OF, from: :Person, to: :Organization
-      edge :FRIEND, from: :Person, to: :Person, symmetric: true
+      edge :MEMBER_OF, from: :Person, to: :Organization, temporal: temporal
+      edge :FRIEND, from: :Person, to: :Person, symmetric: true, temporal: temporal
     end
   end
 end

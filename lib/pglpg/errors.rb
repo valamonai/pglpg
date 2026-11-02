@@ -10,6 +10,10 @@ module Pglpg
   # pglpg is used without a required policy or setting.
   class ConfigurationError < Error; end
 
+  class ReadOnlyContext < Error; end
+  class TemporalModeRequired < Error; end
+  class TemporalMigrationRequired < Error; end
+
   # A Ref belongs to another graph or is the wrong kind of element.
   class InvalidRef < Error; end
 

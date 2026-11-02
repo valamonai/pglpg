@@ -37,7 +37,7 @@ module Pglpg
   class Edge
     attr_reader :ref, :type, :source, :target, :properties, :attrs, :created_at, :updated_at
 
-    def initialize(ref:, type:, source:, target:, properties:, attrs:, created_at:, updated_at:, symmetric: false)
+    def initialize(ref:, type:, source:, target:, properties:, attrs:, created_at:, updated_at:, symmetric: false, temporal: false, valid_from: nil, valid_to: nil)
       @ref = ref
       @type = type
       @source = source
@@ -46,6 +46,9 @@ module Pglpg
       @attrs = attrs
       @created_at = created_at
       @updated_at = updated_at
+      @temporal = temporal
+      @valid_from = valid_from
+      @valid_to = valid_to
       @symmetric = symmetric
       freeze
     end
@@ -53,6 +56,10 @@ module Pglpg
     def id = ref.id
 
     def [](name) = properties[name.to_sym]
+
+    attr_reader :valid_from, :valid_to
+
+    def temporal? = @temporal
 
     def symmetric? = @symmetric
 

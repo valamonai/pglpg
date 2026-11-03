@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-11-03)
 
 ### Breaking
 
@@ -18,6 +18,18 @@
   declarations. Incompatible legacy columns require an application migration;
   timestamp values are never silently cast to dates. The helper locks the
   table and atomically installs metadata/checks plus an optional backfill.
+- Complete-key lookups validate literal component values: nil, arrays and
+  query conditions are refused before SQL, including on existing single/scoped
+  keys. Use `match` for structured property filters.
+- Adopting composite/edge keys or endpoint/property uniqueness requires
+  auditing and backfilling all required components, resolving duplicates and
+  running `storage.sync_constraints!` in the same application transaction.
+  New caller-chosen key forms require the trusted writer; unique components
+  cannot be changed and keyed edge upserts cannot rewire endpoints.
+- Opting a type into `open: true` rejects duplicate String/Symbol aliases for
+  declared fields as well as extras. Closed normalization is unchanged.
+  Openness inherits from any open parent; local false does not close it.
+  Closing/promoting declarations needs explicit data audit/backfill.
 
 ### Added
 

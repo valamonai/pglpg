@@ -96,7 +96,11 @@ module Pglpg
     end
 
     class EdgeBuilder < ElementBuilder
-      def key(*names, generate: nil) = @type.key_property(*names, generate:)
+      def key(*names, generate: nil, scope: nil)
+        raise SchemaError, "Edge scope: is not supported" unless scope.nil?
+
+        @type.key_property(*names, generate:)
+      end
     end
 
     class NodeBuilder < ElementBuilder

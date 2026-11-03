@@ -29,6 +29,11 @@ RSpec.describe "general keys (ADR-0014)" do
         property :note, :string
         key :catalog, :number
       end
+      edge :SAME_DOCUMENT, from: :Record, to: :Record, symmetric: true, temporal: true do
+        property :catalog, :string, required: true
+        property :number, :integer, required: true
+        key :catalog, :number
+      end
       edge :ASSIGNED, from: :Record, to: :Record, symmetric: true, temporal: true, unique: [:role] do
         property :role, :enum, values: %w[lead reviewer], required: true
         property :note, :string
@@ -194,11 +199,35 @@ RSpec.describe "general keys (ADR-0014)" do
 
   it "enforces tuple presence, integer equality and integral values through direct SQL" do
     a
-    [key.except(:active), key.merge(active: nil), key.merge(number: "1"), key.merge(number: 1.5), key.merge(number: 1.0)].each do |bad|
-      expect { raw_node(bad) }.to raise_error(ActiveRecord::StatementInvalid)
+    [key.except(:active), key.merge(active: nil), key.merge(number: "1"), key.merge(number: 1.5)].each do |bad|
+      expect { raw_node(bad) }.to raise_error(ActiveRecord::StatementInvalid) { expect(_1.cause).to be_a(PG::CheckViolation) }
     end
+    expect { raw_node(key.merge(number: 1.0)) }.to raise_error(ActiveRecord::RecordNotUnique) { expect(_1.cause).to be_a(PG::UniqueViolation) }
+    raw_node(key.merge(number: 7.0))
+    expect(context.find_node(:Document, **key.merge(number: 7))[:number]).to eq(7)
     expect(context.find_node(:Document, **key).ref).to eq(a)
     expect { graph.storage.sync_constraints! }.not_to raise_error
+  end
+
+  it "canonicalizes a symmetric property key before policy and preserves its dated lookup" do
+    requests = []
+    policy = Module.new do
+      define_singleton_method(:authorize?) { |request| requests << request; true }
+    end
+    g = define_graph(write_policy: policy)
+    ctx = g.for(viewer: Viewer.new(4), as_of: :any)
+    w = ctx.trusted_writer
+    lower, upper = [a, b].sort_by(&:id)
+    options = { key: { catalog: "same", number: 1 }, attrs:, valid_from: Date.new(2020, 1, 1), valid_to: Date.new(2021, 1, 1) }
+    edge = w.upsert_edge(:SAME_DOCUMENT, from: upper, to: lower, **options)
+    expect(w.upsert_edge(:SAME_DOCUMENT, from: lower, to: upper, **options.except(:valid_to))).to eq(edge)
+    expect(requests.map { [_1.from, _1.to, _1.key] }).to eq([[lower, upper, options[:key]], [lower, upper, options[:key]]])
+    expect(ctx.find_edge(:SAME_DOCUMENT, **options[:key]).ref).to eq(edge)
+    stored = ctx.find(edge)
+    expect([stored.source, stored.target, stored.valid_to]).to eq([lower, upper, Date.new(2021, 1, 1)])
+    expect(g.for(viewer: Viewer.new(4), as_of: Date.new(2020, 6, 1)).find_edge(:SAME_DOCUMENT, **options[:key]).ref).to eq(edge)
+    expect(g.for(viewer: Viewer.new(4), as_of: Date.new(2022, 6, 1)).find_edge(:SAME_DOCUMENT, **options[:key])).to be_nil
+    expect { g.for(viewer: Viewer.new(4)).find_edge(:SAME_DOCUMENT, **options[:key]) }.to raise_error(Pglpg::TemporalModeRequired)
   end
 
   it "can use the full unique index for composite, numeric and edge key lookups" do
@@ -233,6 +262,9 @@ RSpec.describe "general keys (ADR-0014)" do
     expect do
       Pglpg::Graph.define(:bad) { node(:N); edge(:E, from: :N, to: :N, unique: [:x]) { property :x, :string } }
     end.to raise_error(Pglpg::SchemaError)
+    expect do
+      Pglpg::Graph.define(:bad) { node(:N); edge(:E, from: :N, to: :N) { key :uid, scope: :namespace } }
+    end.to raise_error(Pglpg::SchemaError, /Edge scope: is not supported/)
   end
 
   it "enforces edge enum membership and tuple presence on direct SQL" do
@@ -300,6 +332,49 @@ RSpec.describe "general keys (ADR-0014)" do
     expect(connection.indexes(old.nodes_table).map(&:name)).not_to include(*before.select { _1.start_with?("pglpg_") })
     connection.execute("INSERT INTO key_upgrade_nodes (key_label, labels, properties) VALUES ('N', ARRAY['N'], '{\"uid\":\"one\",\"version\":2}')")
     expect(connection.select_value("SELECT count(*) FROM key_upgrade_nodes")).to eq(2)
+  end
+
+  it "restores the old edge index after a failed edge-key migration and backfills explicitly" do
+    old = Pglpg::Graph.define(:edge_key_upgrade) do
+      node :N
+      edge :E, from: :N, to: :N, unique: :pair
+    end
+    upgraded = Pglpg::Graph.define(:edge_key_upgrade) do
+      node :N
+      edge :E, from: :N, to: :N, unique: [:role] do
+        property :role, :string, required: true
+        property :catalog, :string, required: true
+        property :number, :integer, required: true
+        key :catalog, :number
+      end
+    end
+    old.storage.create!
+    connection = graph.connection
+    connection.execute("INSERT INTO edge_key_upgrade_nodes (id, key_label, labels, properties) OVERRIDING SYSTEM VALUE VALUES (1, 'N', ARRAY['N'], '{}'), (2, 'N', ARRAY['N'], '{}')")
+    insert_sql = "INSERT INTO edge_key_upgrade_edges (type, source_id, target_id, properties) VALUES ('E', 1, 2, '{}'::jsonb)"
+    connection.execute(insert_sql)
+    old_indexes = connection.indexes(old.edges_table).map(&:name).sort
+    old_unique = connection.indexes(old.edges_table).select(&:unique).map(&:name)
+    expect(old_unique.size).to eq(1)
+    expect { upgraded.storage.sync_constraints! }.to raise_error(ActiveRecord::StatementInvalid)
+    expect(connection.indexes(old.edges_table).map(&:name).sort).to eq(old_indexes)
+    expect do
+      connection.transaction(requires_new: true) { connection.execute(insert_sql) }
+    end.to raise_error(ActiveRecord::RecordNotUnique)
+    connection.transaction(requires_new: true) do
+      connection.execute("UPDATE edge_key_upgrade_edges SET properties = '{\"role\":\"lead\",\"catalog\":\"source\",\"number\":1}'::jsonb")
+      upgraded.storage.sync_constraints!
+    end
+    expect(connection.indexes(old.edges_table).map(&:name) & old_unique).to be_empty
+    connection.execute("INSERT INTO edge_key_upgrade_edges (type, source_id, target_id, properties) VALUES ('E', 1, 2, '{\"role\":\"reviewer\",\"catalog\":\"source\",\"number\":2}'::jsonb)")
+    expect(connection.select_value("SELECT count(*) FROM edge_key_upgrade_edges")).to eq(2)
+    ["{\"role\":\"third\",\"catalog\":\"source\",\"number\":1}", "{\"role\":\"lead\",\"catalog\":\"other\",\"number\":3}"].each do |json|
+      expect do
+        connection.transaction(requires_new: true) do
+          connection.execute("INSERT INTO edge_key_upgrade_edges (type, source_id, target_id, properties) VALUES ('E', 1, 2, #{connection.quote(json)}::jsonb)")
+        end
+      end.to raise_error(ActiveRecord::RecordNotUnique)
+    end
   end
 
   it "serializes competing composite node and keyed-edge writes with PostgreSQL arbiters", :committed do

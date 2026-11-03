@@ -26,6 +26,7 @@
   domains and exact edge-type domains. General tuples and single non-string
   keys require trusted insertion; legacy single-string generation and scoped
   node occupancy grants retain their behavior. All components are immutable.
+  Unsupported edge scope declarations raise `SchemaError` explicitly.
 - `Context#find_edge(type, **key)` looks up a full edge property key through
   current visibility on the edge and both endpoints, with the context's date.
   Complete-key node/edge lookups validate literal values before SQL.

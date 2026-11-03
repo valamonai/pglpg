@@ -16,6 +16,9 @@ module Pglpg
     KEYWORDS = %w[MATCH WHERE AND RETURN DISTINCT ORDER BY ASC DESC LIMIT].freeze
     UNSUPPORTED_WORDS = %w[OPTIONAL CREATE INSERT DELETE DETACH SET REMOVE MERGE
                            CALL WITH UNION OFFSET SKIP GROUP HAVING].freeze
+    CONDITION_PREFIXES = %w[NOT ANY ALL NONE SINGLE EXISTS].freeze
+    CONDITION_OPERATORS = %w[IS IN NOT STARTS ENDS CONTAINS LIKE BETWEEN].freeze
+    CONDITION_CONNECTORS = %w[OR XOR].freeze
     Token = Data.define(:text, :position)
 
     def initialize(context, text, params)
@@ -175,13 +178,15 @@ module Pglpg
 
       predicates = []
       loop do
-        if @token.text == "("
+        # Contextual keywords can still name a binding in a property reference.
+        prefix = CONDITION_PREFIXES.include?(@token.text&.upcase) && !@scanner.check(/\s*\./)
+        if @token.text == "(" || prefix
           fail_at(:unsupported_condition, "only AND-joined equality predicates are supported")
         end
         var, property = property_reference
         unless accept("=")
           fail_at(:unsupported_condition, "only equality predicates are supported") if %w[< > !].include?(@token.text) ||
-            %w[IS IN].include?(@token.text&.upcase)
+            CONDITION_OPERATORS.include?(@token.text&.upcase)
           unexpected("expected =")
         end
         unless @token.text&.match?(/\A#{PARAMETER}\z/)
@@ -189,7 +194,7 @@ module Pglpg
           unexpected("expected a named parameter")
         end
         predicates << [var, property, take]
-        fail_at(:unsupported_condition, "only AND conjunctions are supported") if @token.text&.casecmp?("OR")
+        fail_at(:unsupported_condition, "only AND conjunctions are supported") if CONDITION_CONNECTORS.include?(@token.text&.upcase)
         break unless accept("AND")
       end
       predicates
@@ -203,7 +208,7 @@ module Pglpg
 
     def return_binding
       var = identifier
-      fail_at(:unsupported, "RETURN accepts element bindings only") if %w[. (].include?(@token.text)
+      fail_at(:unsupported, "RETURN accepts element bindings only") if %w[. ( AS].include?(@token.text&.upcase)
       var
     end
 
@@ -212,6 +217,7 @@ module Pglpg
       var, name = property_reference
       direction = accept("DESC") ? :desc : :asc
       accept("ASC") if direction == :asc
+      fail_at(:unsupported, "ORDER BY accepts one term") if @token.text == ","
       [var, name, direction]
     end
 

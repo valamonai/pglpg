@@ -8,15 +8,13 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.3.0 release candidate; not yet published.** The latest published
-version is 0.2.0. This candidate includes temporal edges, composite/edge keys
+Status: **0.3.0**, published on November 3, 2026. This release includes
+temporal edges, composite/edge keys
 and explicit open properties. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
 ## Install
-
-After 0.3.0 publication:
 
 ```ruby
 gem "pglpg", "~> 0.3.0"
@@ -60,7 +58,7 @@ Existing timeless, closed schemas with unchanged keys need no migration solely
 for the version bump. Rerun your real-policy leak suite and label-drift checks
 when adopting this minor release.
 
-This candidate implements a documented standards subset: key components are
+This release implements a documented standards subset: key components are
 string/integer/boolean/enum, open extras are scalars/flat homogeneous lists,
 and temporal validity is one date interval with current authorization. It does
 not add alternate/overlap keys, open labels, dynamic query/model attributes,
@@ -232,7 +230,7 @@ row access. Scope and key are immutable. Existing data needs a transactional
 backfill and constraint migration; see the
 [API contract](https://knowen.md/nodes/36329).
 
-## Composite and edge keys (0.3.0 candidate)
+## Composite and edge keys (0.3.0)
 
 Keys can use a tuple of required string, integer, boolean or enum properties:
 
@@ -278,7 +276,7 @@ by `storage.sync_constraints!` on the same connection. No automatic migration
 runs when a declaration is loaded. Other property types, optional uniqueness
 and multiple alternate keys are outside this key API.
 
-## Open properties (0.3.0 candidate)
+## Open properties (0.3.0)
 
 Types stay closed by default. Opt in to extra properties explicitly:
 
@@ -326,7 +324,7 @@ Audit/backfill before closing types or promoting extras to typed declarations.
 Shape validation is at the library write boundary; raw SQL does not gain an
 open/closed constraint. The existing required-property and key checks remain.
 
-## Temporal edges (0.3.0 candidate)
+## Temporal edges (0.3.0)
 
 Opt in per edge type and use one date across the whole query:
 

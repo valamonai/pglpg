@@ -30,7 +30,7 @@ RSpec.describe "graph type DSL" do
     expect { define { node(:A, extends: :B); node(:B, extends: :A) } }.to raise_error(Pglpg::SchemaError, /cycle/)
     expect { define { node(:A) { key :uid } } }.to raise_error(Pglpg::SchemaError, /not a declared property/)
     expect { define { node(:A) { property :uid, :string; key :uid } } }.to raise_error(Pglpg::SchemaError, /required/)
-    expect { define { node(:A) { property :n, :integer, required: true; key :n } } }
+    expect { define { node(:A) { property :n, :float, required: true; key :n } } }
       .to raise_error(Pglpg::SchemaError, /string/)
     expect { define { node(:A) { property :x, :blob } } }.to raise_error(Pglpg::SchemaError, /unknown property type/)
     expect { define { node(:A) { property :x, :enum } } }.to raise_error(Pglpg::SchemaError, /values/)

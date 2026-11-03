@@ -21,6 +21,25 @@
 
 ### Added
 
+- Composite node keys and edge property keys (ADR-0014): `key :a, :b` on
+  required string/integer/boolean/enum properties, with inherited node-key
+  domains and exact edge-type domains. General tuples and single non-string
+  keys require trusted insertion; legacy single-string generation and scoped
+  node occupancy grants retain their behavior. All components are immutable.
+  Unsupported edge scope declarations raise `SchemaError` explicitly.
+- `Context#find_edge(type, **key)` looks up a full edge property key through
+  current visibility on the edge and both endpoints, with the context's date.
+  Complete-key node/edge lookups validate literal values before SQL.
+- `unique: [:p, :q]` enforces a required endpoint/property tuple per edge type.
+  Trusted keyed edge upsert accepts `key:` and requires unchanged endpoints;
+  without a property key, upsert uses endpoint/property uniqueness. Constraints
+  are cumulative and span all dates. Uniqueness properties cannot be updated.
+- Composite/non-string model keys are required attributes, created through
+  `save(writer:)`; generated keys remain unassignable. Composite key readers
+  return frozen maps; legacy node scalar/scoped key readers stay scalar.
+  Adoption requires application backfill/deduplication and transactional
+  `sync_constraints!`; no automatic data migration is performed.
+
 - Context inspection shows an explicitly selected Date or `:any` read mode.
 - Opt-in `temporal: true` edge types (ADR-0013): exact Date metadata,
   half-open `[valid_from, valid_to)` intervals, nil unbounded, finite dates

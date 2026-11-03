@@ -29,14 +29,8 @@ module Pglpg
 
     def insert_node(type, properties: {}, attrs: {})
       node_type = concrete_node_type!(type)
-      props = properties.transform_keys(&:to_sym)
-      if (key = node_type.key)
-        if props.key?(key.property)
-          raise ArgumentError, "#{node_type.name}.#{key.property} is a key and is generated" unless @trusted || key.scope
-        else
-          props[key.property] = key.generate(node_type.name)
-        end
-      end
+      props = prepare_key(node_type, properties)
+      key = node_type.key
       json = node_type.encode_properties(props)
       cols = encode_attrs(@graph.type.node_columns, attrs, insert: true)
       authorize!(:insert_node, node_type.name, properties: props, attrs:)
@@ -82,7 +76,7 @@ module Pglpg
       node_type = concrete_node_type!(type)
       node_key = node_type.key or raise ArgumentError, "#{node_type.name} has no key"
       key = key.transform_keys(&:to_sym)
-      raise ArgumentError, "#{node_type.name} is upserted by #{node_key.properties.inspect}" unless key.keys.sort == node_key.properties.sort
+      node_key.validate_values!(node_type, key)
 
       props = properties.transform_keys(&:to_sym)
       raise ArgumentError, "pass the key in key:, not properties:" if (props.keys & node_key.properties).any?
@@ -95,11 +89,7 @@ module Pglpg
       sql = new_sql
       insert_node_values(sql, node_type, json, cols)
       sql << " ON CONFLICT ("
-      node_key.properties.each_with_index do |property, i|
-        sql << ", " if i.positive?
-        sql << "(properties->>"
-        sql.literal(property) << ")"
-      end
+      sql << node_key.expressions(@graph.connection).join(", ")
       sql << ") WHERE labels @> ARRAY["
       sql.literal(node_key.declared_on) << "]::text[] DO UPDATE SET "
       set_properties(sql, "tgt.properties", json, null_keys(props), excluded: true)
@@ -129,20 +119,32 @@ module Pglpg
 
     def insert_edge(type, from:, to:, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
       edge_type = @graph.type.edge_type!(type)
-      if edge_type.unique_pair? && !@trusted
-        raise ArgumentError, "#{edge_type.name} is unique per pair; write it through the trusted writer"
+      if edge_type.unique_tuple? && !@trusted
+        raise ArgumentError, "#{edge_type.name} is unique per pair or property tuple; write it through the trusted writer"
       end
 
       write_edge(:insert_edge, edge_type, from, to, properties, attrs, valid_from, valid_to)
     end
 
-    # Trusted only, for edge types declared unique: :pair.
-    def upsert_edge(type, from:, to:, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
+    # Trusted only. A declared edge key takes precedence as conflict arbiter;
+    # otherwise the endpoint/property tuple is used.
+    def upsert_edge(type, from:, to:, key: nil, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
       trusted!(:upsert_edge)
       edge_type = @graph.type.edge_type!(type)
-      raise ArgumentError, "#{edge_type.name} is not unique per pair; use insert_edge" unless edge_type.unique_pair?
+      if edge_type.key
+        raise ArgumentError, "#{edge_type.name} requires key:" unless key.is_a?(Hash)
 
-      write_edge(:upsert_edge, edge_type, from, to, properties, attrs, valid_from, valid_to)
+        key = key.transform_keys(&:to_sym)
+        edge_type.key.validate_values!(edge_type, key)
+        properties = properties.transform_keys(&:to_sym)
+        raise ArgumentError, "pass the key in key:, not properties:" if (properties.keys & edge_type.key.properties).any?
+
+        properties = properties.merge(key)
+      else
+        raise ArgumentError, "#{edge_type.name} has no property key" unless key.nil?
+        raise ArgumentError, "#{edge_type.name} is not unique; use insert_edge" unless edge_type.unique_tuple?
+      end
+      write_edge(:upsert_edge, edge_type, from, to, properties, attrs, valid_from, valid_to, key:)
     end
 
     def update_edge(ref, properties: {}, attrs: {}, valid_from: Temporal::OMITTED, valid_to: Temporal::OMITTED)
@@ -152,6 +154,9 @@ module Pglpg
       validity = Temporal.bounds(edge_type, valid_from, valid_to)
       Temporal.validate_interval!(validity.fetch(:valid_from, edge.valid_from), validity.fetch(:valid_to, edge.valid_to))
       props = properties.transform_keys(&:to_sym)
+      if (props.keys & edge_type.immutable_properties).any?
+        raise ArgumentError, "key and uniqueness properties cannot be changed"
+      end
       json = edge_type.encode_properties(props, partial: true)
       cols = encode_attrs(@graph.type.edge_columns, attrs, insert: false)
       cols += validity_columns(validity)
@@ -183,7 +188,7 @@ module Pglpg
 
     private
 
-    def write_edge(operation, edge_type, from, to, properties, attrs, valid_from, valid_to)
+    def write_edge(operation, edge_type, from, to, properties, attrs, valid_from, valid_to, key: nil)
       validity = Temporal.bounds(edge_type, valid_from, valid_to, required: true)
       @graph.check_ref!(from, :node)
       @graph.check_ref!(to, :node)
@@ -195,12 +200,12 @@ module Pglpg
         # Stored in canonical orientation, so either order names the same pair.
         from, to = to, from if from.id > to.id
       end
-      props = properties.transform_keys(&:to_sym)
+      props = prepare_key(edge_type, properties)
       json = edge_type.encode_properties(props)
       cols = encode_attrs(@graph.type.edge_columns, attrs, insert: true)
       update_cols = cols + validity_columns(validity)
       cols += validity_columns(edge_type.temporal? ? { valid_from: nil, valid_to: nil }.merge(validity) : {})
-      request = authorize!(operation, edge_type.name, from:, to:, properties: props, attrs:, validity:)
+      request = authorize!(operation, edge_type.name, from:, to:, key:, properties: props, attrs:, validity:)
 
       sql = new_sql
       sql << "INSERT INTO " << table(@graph.edges_table) << " AS tgt (type, source_id, target_id, properties"
@@ -228,15 +233,47 @@ module Pglpg
       # Endpoints stay locked against concurrent change until commit.
       sql << " FOR SHARE OF s, t"
       if operation == :upsert_edge
-        sql << " ON CONFLICT (source_id, target_id) WHERE type = "
+        expressions = if edge_type.key
+                        edge_type.key.expressions(@graph.connection)
+                      else
+                        ["source_id", "target_id", *(edge_type.pair_key&.expressions(@graph.connection) || [])]
+                      end
+        sql << " ON CONFLICT (" << expressions.join(", ") << ") WHERE type = "
         sql.literal(edge_type.name) << " DO UPDATE SET "
         set_properties(sql, "tgt.properties", json, null_keys(props), excluded: true)
         set_columns(sql, update_cols, excluded: true)
-        sql << " WHERE "
+        # A property key must never redirect an existing relationship. Pair
+        # properties are immutable too, including when a global key arbitrates.
+        sql << " WHERE tgt.source_id = EXCLUDED.source_id AND tgt.target_id = EXCLUDED.target_id"
+        edge_type.unique_pair_properties.each do |property|
+          sql << " AND tgt.properties->"
+          sql.literal(property) << " = EXCLUDED.properties->"
+          sql.literal(property)
+        end
+        sql << " AND "
         existing_row(sql, :edge, request)
       end
       sql << " RETURNING id"
       ref(:edge, write(sql))
+    end
+
+    def prepare_key(type, properties)
+      props = properties.transform_keys(&:to_sym)
+      key = type.key
+      return props unless key
+      unless key.generated?
+        raise ArgumentError, "#{type.name} has a caller-chosen key; use the trusted writer" unless @trusted
+
+        return props
+      end
+      if props.key?(key.property)
+        unless @trusted || (type.is_a?(Schema::NodeType) && key.scope)
+          raise ArgumentError, "#{type.name}.#{key.property} is a key and is generated"
+        end
+      else
+        props[key.property] = key.generate(type.name)
+      end
+      props
     end
 
     def endpoint_labels(sql, source_label, target_label)

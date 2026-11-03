@@ -36,8 +36,8 @@ RSpec.shared_examples "a pglpg visibility policy" do
       end
       node :Project do
         property :uid, :string, required: true
-        property :title, :string
-        key :uid
+        property :title, :string, required: true
+        key :uid, :title
       end
       node :Location do
         property :uid, :string, required: true
@@ -45,6 +45,9 @@ RSpec.shared_examples "a pglpg visibility policy" do
       end
       edge :WORKS_ON, from: :Person, to: :Project, temporal: temporal do
         property :role, :string
+        property :uid, :string, required: true
+        property :batch, :integer, required: true
+        key :uid, :batch
       end
       edge :BASED_AT, from: :Project, to: :Location, temporal: temporal
       edge :KNOWS, from: :Person, to: :Person, temporal: temporal
@@ -72,7 +75,10 @@ RSpec.shared_examples "a pglpg visibility policy" do
     hid = pglpg_hidden_attrs
     person = ->(uid, name, rank, attrs) { seed.insert_node(:Person, properties: { uid:, name:, rank:, namespace: attrs == hid ? "hidden" : "visible" }, attrs:) }
     node = ->(type, uid, attrs, **props) { seed.insert_node(type, properties: { uid:, **props }, attrs:) }
-    edge = ->(type, from, to, attrs, **props) { seed.insert_edge(type, from:, to:, properties: props, attrs:, **(pglpg_temporal ? { valid_from: nil } : {})) }
+    edge = lambda do |type, from, to, attrs, **props|
+      props = props.merge(uid: "#{from.id}-#{to.id}", batch: 1) if type == :WORKS_ON
+      seed.insert_edge(type, from:, to:, properties: props, attrs:, **(pglpg_temporal ? { valid_from: nil } : {}))
+    end
 
     # Created first, so it has the smallest id: symmetric edges to it are
     # stored with the hidden node in the source column.
@@ -137,7 +143,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
         hidden_refs << seed.insert_edge(:KNOWS, from:, to:, attrs: vis, valid_from: nil, valid_to: Date.new(2020, 6, 1))
       end
       hidden_refs << seed.insert_edge(:FRIEND, from: p1, to: p3, attrs: vis, valid_from: Date.new(2020, 6, 2))
-      hidden_refs << seed.insert_edge(:WORKS_ON, from: p1, to: j2, attrs: vis, valid_from: nil, valid_to: Date.new(2020, 6, 1))
+      hidden_refs << seed.insert_edge(:WORKS_ON, from: p1, to: j2, properties: { uid: "expired", batch: 1 }, attrs: vis, valid_from: nil, valid_to: Date.new(2020, 6, 1))
     end
 
     after = Pglpg::Testing.observe(ctx, visible_refs)

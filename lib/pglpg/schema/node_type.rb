@@ -1,23 +1,10 @@
 # frozen_string_literal: true
 
-require "securerandom"
-
 module Pglpg
   module Schema
     # A node type: a key label, inherited labels and property types
     # (GQL node types, PG-Schema inheritance).
     class NodeType < ElementType
-      # An exclusive, mandatory string key, optionally scoped by another
-      # required string property. Caller-chosen scoped keys need an explicit
-      # occupancy grant; omitted keys use +generator+.
-      Key = Struct.new(:property, :declared_on, :generator, :scope, keyword_init: true) do
-        def properties = [scope, property].compact.freeze
-
-        def generate(type) = generator.call(type)
-      end
-
-      DEFAULT_KEY_GENERATOR = ->(_type) { SecureRandom.uuid }
-
       attr_reader :parents, :labels, :key, :ancestors
 
       def initialize(name, extends: [], abstract: false)
@@ -29,11 +16,10 @@ module Pglpg
 
       def abstract? = @abstract
 
-      def key_property(name, generate: nil, scope: nil)
+      def key_property(*names, generate: nil, scope: nil)
         raise SchemaError, "#{self.name} declares more than one key" if @own_key
-        raise SchemaError, "key generator for #{self.name} must respond to call" if generate && !generate.respond_to?(:call)
 
-        @own_key = Key.new(property: name.to_sym, declared_on: self.name, generator: generate || DEFAULT_KEY_GENERATOR, scope: scope && Schema.check_name!(scope, "key scope"))
+        @own_key = Key.new(names, declared_on: self.name, generate:, scope:)
       end
 
       def own_key = @own_key
@@ -82,19 +68,8 @@ module Pglpg
         key = keys.first
         return nil unless key
 
-        prop = @properties[key.property]
-        raise SchemaError, "key #{key.declared_on}.#{key.property} is not a declared property" unless prop
-        raise SchemaError, "key #{key.declared_on}.#{key.property} must be required" unless prop.required?
-        raise SchemaError, "key #{key.declared_on}.#{key.property} must be a string" unless prop.type == :string
-
-        if key.scope
-          raise SchemaError, "scope must differ from key property" if key.scope == key.property
-          scope = @properties[key.scope]
-          unless scope && scope.required? && scope.type == :string
-            raise SchemaError, "key scope #{key.scope} must be a declared required string property"
-          end
-        end
-        key.freeze
+        # Inherited descriptors are already resolved and immutable.
+        key.frozen? ? key : key.resolve!(self)
       end
     end
   end

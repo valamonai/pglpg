@@ -189,6 +189,52 @@ row access. Scope and key are immutable. Existing data needs a transactional
 backfill and constraint migration; see the
 [API contract](https://knowen.md/nodes/36329).
 
+## Composite and edge keys (0.3, unreleased)
+
+Keys can use a tuple of required string, integer, boolean or enum properties:
+
+```ruby
+node :Document do
+  property :catalog, :string, required: true
+  property :number, :integer, required: true
+  key :catalog, :number
+end
+edge :CITES, from: :Document, to: :Document do
+  property :source, :string, required: true
+  property :external_id, :string, required: true
+  key :source, :external_id
+end
+```
+
+General tuples and single non-string keys require a trusted writer on insert.
+Single string keys retain automatic generation; existing scoped node keys
+retain their explicit occupancy grant. Edge keys are unique within the edge
+type, independently of endpoints. A keyed edge upsert requires the full key
+and the original endpoints; it cannot rewire a relationship.
+
+```ruby
+w = ctx.trusted_writer
+ref = w.upsert_node(:Document, key: { catalog: "main", number: 7 })
+ctx.find_node(:Document, catalog: "main", number: 7)
+w.upsert_edge(:CITES, from: ref, to: other,
+              key: { source: "archive", external_id: "citation-1" })
+ctx.find_edge(:CITES, source: "archive", external_id: "citation-1")
+```
+
+`unique: [:role]` on an edge type adds the required role to its endpoint-pair
+uniqueness tuple. It allows different roles between the same endpoints and
+requires trusted insertion/upsert. A declared `key` and `unique:` can coexist;
+keyed upsert uses the key, and both constraints still apply. All key and
+uniqueness properties are immutable, and uniqueness spans all validity dates.
+Symmetric types use the canonical unordered endpoint pair.
+
+Composite model attributes are required; create with `save(writer: w)` using
+the record's own context's writer. Generated model keys remain unassignable.
+Existing data needs an explicit transactional backfill/deduplication followed
+by `storage.sync_constraints!` on the same connection. No automatic migration
+runs when a declaration is loaded. Other property types, optional uniqueness
+and multiple alternate keys are outside this key API.
+
 ## Temporal edges (0.3, unreleased)
 
 Opt in per edge type and use one date across the whole query:

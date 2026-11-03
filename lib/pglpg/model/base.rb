@@ -181,7 +181,7 @@ module Pglpg
       # only. Returns false when validation fails. Refusals (WriteRejected,
       # NotTrusted), timeouts and database errors raise; changes are kept on
       # any failure. +writer:+ hands over the context's trusted writer, for
-      # trusted-only operations; it never permits assigning a key.
+      # trusted-only operations; generated keys remain unassignable.
       #
       # Success means the statement succeeded in the caller's transaction.
       # Local state is what was assigned, not a stored snapshot (generated

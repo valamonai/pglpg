@@ -51,6 +51,12 @@ module Pglpg
 
       def temporal? = schema_type.temporal?
 
+      def key
+        descriptor = schema_type.key or return nil
+        values = descriptor.properties.to_h { [_1, attribute(_1.to_s)] }
+        descriptor.property ? values[descriptor.property] : values.freeze
+      end
+
       # The endpoint opposite +ref+ (the same node for a self-loop).
       def other(ref)
         return target if ref == source
@@ -71,6 +77,7 @@ module Pglpg
 
       validate :validate_endpoints
       validate :validate_validity
+      validate :validate_keys
 
       private
 
@@ -130,6 +137,25 @@ module Pglpg
         Temporal.validate_interval!(valid_from, valid_to)
       rescue ValidationError => e
         errors.add(:valid_from, e.message)
+      end
+
+      def required_now?(name)
+        return false if new_record? && schema_type.key&.generated? && schema_type.key.property == name
+
+        super
+      end
+
+      def validate_keys
+        key = schema_type.key
+        if new_record?
+          if key&.generated? && !attribute(key.property.to_s).nil?
+            errors.add(key.property, "is generated and cannot be assigned")
+          end
+        else
+          schema_type.immutable_properties.each do |property|
+            errors.add(property, "cannot be changed") if attribute_changed?(property.to_s)
+          end
+        end
       end
 
       def validate_endpoints

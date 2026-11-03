@@ -369,12 +369,20 @@ module Pglpg
         sql << " AND "
         case cond.op
         when :eq
-          if key && key.property == prop.name
-            # Matches the key's partial unique index.
-            sql << a << ".labels @> ARRAY["
-            sql.literal(key.declared_on) << "]::text[] AND (" << a << ".properties ->> "
+          if key && key.properties.include?(prop.name)
+            # Match every component of the same partial index used by the
+            # uniqueness arbiter, including jsonb numeric/boolean equality.
+            if @state.nodes.key?(var)
+              sql << a << ".labels @> ARRAY["
+              sql.literal(key.declared_on) << "]::text[]"
+            else
+              sql << a << ".type = "
+              sql.literal(key.declared_on)
+            end
+            sql << " AND (" << a << ".properties " << (key.json_component?(prop.name) ? "-> " : "->> ")
             sql.literal(prop.name) << ") = "
-            sql.bind(prop.encode(cond.value), "text")
+            encoded = prop.encode(cond.value)
+            key.json_component?(prop.name) ? sql.bind_json(encoded) : sql.bind(encoded, "text")
             next
           end
           sql << a << ".properties @> "
@@ -397,8 +405,12 @@ module Pglpg
     end
 
     def key_of(var)
-      label = @state.nodes[var]&.label
-      label && context.graph.type.node_type!(label).key
+      if (node = @state.nodes[var])
+        node.label && context.graph.type.node_type!(node.label).key
+      else
+        edge = @state.edges.find { _1.var == var }
+        edge && context.graph.type.edge_type!(edge.type).key
+      end
     end
 
     # Validates values up front, so errors surface where the query is built.

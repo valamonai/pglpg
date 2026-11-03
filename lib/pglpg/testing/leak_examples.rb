@@ -22,19 +22,19 @@
 # (rows, order, counts, exists?, first, pagination, lookups) is unchanged.
 # Execution time and timeouts are outside this guarantee.
 RSpec.shared_examples "a pglpg visibility policy" do
-  leak_graph = lambda do |visibility, columns, temporal|
+  leak_graph = lambda do |visibility, columns, temporal, open|
     Pglpg::Graph.define(:pglpg_leak, nodes_table: "pglpg_leak_nodes", edges_table: "pglpg_leak_edges",
                                      visibility:, write_policy: Pglpg::Testing::AllowAll,
                                      trusted_writer_allowed: ->(_context) { true }) do
       columns.each { |name, (type, options)| column(name, type, **(options || {})) }
-      node :Person do
+      node :Person, open: open do
         property :uid, :string, required: true
         property :name, :string
         property :rank, :integer
         property :namespace, :string, required: true
         key :uid, scope: :namespace
       end
-      node :Project do
+      node :Project, open: open do
         property :uid, :string, required: true
         property :title, :string, required: true
         key :uid, :title
@@ -43,7 +43,7 @@ RSpec.shared_examples "a pglpg visibility policy" do
         property :uid, :string, required: true
         key :uid
       end
-      edge :WORKS_ON, from: :Person, to: :Project, temporal: temporal do
+      edge :WORKS_ON, from: :Person, to: :Project, temporal: temporal, open: open do
         property :role, :string
         property :uid, :string, required: true
         property :batch, :integer, required: true
@@ -64,19 +64,28 @@ RSpec.shared_examples "a pglpg visibility policy" do
 
   # Optional: also exercise temporal validity with the application policy.
   let(:pglpg_temporal) { false }
+  # Optional: also exercise extra properties through reads/models.
+  let(:pglpg_open_types) { false }
 
-  let(:pglpg_leak_graph) { leak_graph.call(pglpg_visibility, pglpg_columns, pglpg_temporal) }
-  let(:pglpg_seed_graph) { leak_graph.call(Pglpg::Testing::SeeAll, pglpg_columns, pglpg_temporal) }
+  let(:pglpg_leak_graph) { leak_graph.call(pglpg_visibility, pglpg_columns, pglpg_temporal, pglpg_open_types) }
+  let(:pglpg_seed_graph) { leak_graph.call(Pglpg::Testing::SeeAll, pglpg_columns, pglpg_temporal, pglpg_open_types) }
 
   it "keeps every observation unchanged when hidden data is added" do
     pglpg_leak_graph.storage.create!
     seed = pglpg_seed_graph.for(viewer: nil).trusted_writer
     vis = pglpg_visible_attrs
     hid = pglpg_hidden_attrs
-    person = ->(uid, name, rank, attrs) { seed.insert_node(:Person, properties: { uid:, name:, rank:, namespace: attrs == hid ? "hidden" : "visible" }, attrs:) }
-    node = ->(type, uid, attrs, **props) { seed.insert_node(type, properties: { uid:, **props }, attrs:) }
+    person = lambda do |uid, name, rank, attrs|
+      extras = pglpg_open_types ? { source_note: uid, evidence: ["one", "two"] } : {}
+      seed.insert_node(:Person, properties: { uid:, name:, rank:, namespace: attrs == hid ? "hidden" : "visible", **extras }, attrs:)
+    end
+    node = lambda do |type, uid, attrs, **props|
+      extras = pglpg_open_types && type == :Project ? { source_note: uid } : {}
+      seed.insert_node(type, properties: { uid:, **props, **extras }, attrs:)
+    end
     edge = lambda do |type, from, to, attrs, **props|
       props = props.merge(uid: "#{from.id}-#{to.id}", batch: 1) if type == :WORKS_ON
+      props = props.merge(source_note: "evidence", evidence: [1, 2]) if pglpg_open_types && type == :WORKS_ON
       seed.insert_edge(type, from:, to:, properties: props, attrs:, **(pglpg_temporal ? { valid_from: nil } : {}))
     end
 

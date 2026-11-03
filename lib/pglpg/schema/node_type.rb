@@ -7,8 +7,8 @@ module Pglpg
     class NodeType < ElementType
       attr_reader :parents, :labels, :key, :ancestors
 
-      def initialize(name, extends: [], abstract: false)
-        super(name)
+      def initialize(name, extends: [], abstract: false, open: false)
+        super(name, open:)
         @parents = Array(extends).map { Schema.check_name!(_1, "type") }.freeze
         @abstract = abstract ? true : false
         @own_key = nil
@@ -37,6 +37,7 @@ module Pglpg
         @ancestors = parent_types.flat_map { [_1.name, *_1.ancestors] }.uniq.freeze
         @labels = ([name] + @ancestors).map(&:to_s).sort.freeze
         @properties = merge_properties(parent_types)
+        resolve_open!(graph_type.node_columns, parents: parent_types)
         @key = resolve_key(parent_types)
         @resolved = true
         freeze

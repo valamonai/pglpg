@@ -57,8 +57,8 @@ node id first, and writes accept the endpoints in either order. Self-loops are
 refused unless the type sets `allow_self_loops: true`.
 
 Property types: `string integer float decimal boolean date datetime enum list`
-(`enum` takes `values:`, `list` takes `of:`). Types are closed: undeclared
-properties are rejected. A nil value means the property is absent.
+(`enum` takes `values:`, `list` takes `of:`). Types are closed by default: undeclared
+properties are rejected unless the type opts into open properties. A nil value means the property is absent.
 
 In a migration:
 
@@ -234,6 +234,44 @@ Existing data needs an explicit transactional backfill/deduplication followed
 by `storage.sync_constraints!` on the same connection. No automatic migration
 runs when a declaration is loaded. Other property types, optional uniqueness
 and multiple alternate keys are outside this key API.
+
+## Open properties (0.3, unreleased)
+
+Types stay closed by default. Opt in to extra properties explicitly:
+
+```ruby
+node :Person, open: true do
+  property :uid, :string, required: true
+  key :uid
+end
+edge :MENTIONS, from: :Person, to: :Person, open: true
+
+ref = ctx.insert_node(:Person, properties: { source_note: "archive", scores: [1, 2] })
+ctx.find(ref)[:scores] # => [1, 2], frozen
+ctx.update_node(ref, properties: { source_note: nil }) # removes the extra
+```
+
+An open parent makes its descendants open, including with multiple parents;
+`open: false` on a child does not close an open ancestor. Declared properties,
+keys, endpoints and generated labels retain their rules.
+
+Extras accept strings, integers, finite floats, booleans and flat homogeneous
+scalar arrays (including empty arrays). Nil means absent/removal. Maps, nested
+or mixed arrays, nil array members, Symbols, dates/times, decimals and custom
+objects need explicit application conversion or a declared property type.
+Extra names cannot collide with row metadata, validity metadata or application
+columns. Duplicate String/Symbol aliases and invalid names are refused.
+
+Queries, ordering, model attributes and `pluck` still require declarations.
+Models expose extras through their read-only `extra_properties`; saving declared
+attributes preserves them. Write extras through `Context`/`Writer` and reload
+the model to refresh its map. No dynamic query casts or model setters are added.
+
+Openness alone adds no DDL. Closing a type preserves existing extra data on
+reads and declared-only updates; it refuses resubmitted unknown properties.
+Audit/backfill before closing types or promoting extras to typed declarations.
+Shape validation is at the library write boundary; raw SQL does not gain an
+open/closed constraint. The existing required-property and key checks remain.
 
 ## Temporal edges (0.3, unreleased)
 

@@ -21,6 +21,18 @@
 
 ### Added
 
+- Explicit `open: true` node and edge properties (ADR-0015), with openness
+  inherited from any open node parent. Closed remains the default. Declared
+  property/key checks, labels, endpoints, visibility and temporal rules remain.
+- Extra properties accept strict JSON-native scalars and flat homogeneous
+  scalar arrays; nil means absent/removal. Invalid names, duplicate aliases,
+  metadata/application-column collisions and unsupported values are refused
+  before the data statement. Extra decoded JSON values are deeply frozen.
+- Model `extra_properties` remains read-only and declared saves preserve
+  extras. Query/filter/order/pluck still require declared properties. Openness
+  adds no DDL; closing/promoting types requires explicit application auditing
+  and backfill. Optional `pglpg_open_types` shared leak fixtures cover extras.
+
 - Composite node keys and edge property keys (ADR-0014): `key :a, :b` on
   required string/integer/boolean/enum properties, with inherited node-key
   domains and exact edge-type domains. General tuples and single non-string

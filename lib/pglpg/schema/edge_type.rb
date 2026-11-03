@@ -11,8 +11,8 @@ module Pglpg
     class EdgeType < ElementType
       attr_reader :from, :to, :unique, :key, :pair_key
 
-      def initialize(name, from:, to:, unique: nil, symmetric: false, allow_self_loops: false, temporal: false)
-        super(name)
+      def initialize(name, from:, to:, unique: nil, symmetric: false, allow_self_loops: false, temporal: false, open: false)
+        super(name, open:)
         raise SchemaError, "temporal: must be true or false" unless [true, false].include?(temporal)
         @temporal = temporal
         unless unique.nil? || unique == :pair || (unique.is_a?(Array) && !unique.empty?)
@@ -58,6 +58,7 @@ module Pglpg
           raise SchemaError, "edge #{name} refers to unknown node type #{label}"
         end
         @properties = own_properties.dup.freeze
+        resolve_open!(graph_type.edge_columns)
         @key&.resolve!(self)
         @pair_key&.resolve!(self)
         freeze

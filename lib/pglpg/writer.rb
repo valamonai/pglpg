@@ -51,7 +51,7 @@ module Pglpg
       @graph.check_ref!(ref, :node)
       node = @context.find(ref) or raise WriteRejected
       node_type = @graph.type.node_type!(node.key_label)
-      props = properties.transform_keys(&:to_sym)
+      props = node_type.normalize_properties(properties)
       raise ArgumentError, "keys cannot be changed" if node_type.key && (props.keys & node_type.key.properties).any?
 
       json = node_type.encode_properties(props, partial: true)
@@ -78,7 +78,7 @@ module Pglpg
       key = key.transform_keys(&:to_sym)
       node_key.validate_values!(node_type, key)
 
-      props = properties.transform_keys(&:to_sym)
+      props = node_type.normalize_properties(properties)
       raise ArgumentError, "pass the key in key:, not properties:" if (props.keys & node_key.properties).any?
 
       props = props.merge(key)
@@ -136,7 +136,7 @@ module Pglpg
 
         key = key.transform_keys(&:to_sym)
         edge_type.key.validate_values!(edge_type, key)
-        properties = properties.transform_keys(&:to_sym)
+        properties = edge_type.normalize_properties(properties)
         raise ArgumentError, "pass the key in key:, not properties:" if (properties.keys & edge_type.key.properties).any?
 
         properties = properties.merge(key)
@@ -153,7 +153,7 @@ module Pglpg
       edge_type = @graph.type.edge_type!(edge.type)
       validity = Temporal.bounds(edge_type, valid_from, valid_to)
       Temporal.validate_interval!(validity.fetch(:valid_from, edge.valid_from), validity.fetch(:valid_to, edge.valid_to))
-      props = properties.transform_keys(&:to_sym)
+      props = edge_type.normalize_properties(properties)
       if (props.keys & edge_type.immutable_properties).any?
         raise ArgumentError, "key and uniqueness properties cannot be changed"
       end
@@ -258,7 +258,7 @@ module Pglpg
     end
 
     def prepare_key(type, properties)
-      props = properties.transform_keys(&:to_sym)
+      props = type.normalize_properties(properties)
       key = type.key
       return props unless key
       unless key.generated?

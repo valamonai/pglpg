@@ -69,6 +69,15 @@ module Pglpg
       out[:last_by_name] = element_data(m.().node(:p, :Person).order(p: { name: :desc }).first&.fetch(:p))
       out[:find] = refs.map { element_data(ctx.find(_1)) }
       out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, namespace: _1 == "H1" ? "hidden" : "visible", uid: _1)) }
+      out[:find_composite_node] = [["J1", "Apollo"], ["J2", "Gemini"], ["HJ", "Apollo"]].map do |uid, title|
+        element_data(ctx.find_node(:Project, uid:, title:))
+      end
+      persons = refs.select(&:node?).select { ctx.find(_1)&.key_label == :Person }
+      projects = refs.select(&:node?).select { ctx.find(_1)&.key_label == :Project }
+      out[:find_edge] = persons.product(projects).map do |person, project|
+        element_data(ctx.find_edge(:WORKS_ON, uid: "#{person.id}-#{project.id}", batch: 1))
+      end
+      out[:find_expired_edge] = element_data(ctx.find_edge(:WORKS_ON, uid: "expired", batch: 1)) if ctx.as_of.instance_of?(Date)
       out.merge(observe_models(ctx, refs))
     end
 

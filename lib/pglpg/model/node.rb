@@ -131,10 +131,13 @@ module Pglpg
       # of the model's type.
       def schema_type = @schema_type || self.class.schema_type
 
-      # The value of the type's key property, or nil.
+      # A legacy scalar key, a composite property/value map, or nil.
       def key
         key = schema_type.key or return nil
-        self.class.property_names.include?(key.property) ? attribute(key.property.to_s) : extra_properties[key.property]
+        values = key.properties.to_h do |name|
+          [name, self.class.property_names.include?(name) ? attribute(name.to_s) : extra_properties[name]]
+        end
+        key.property ? values[key.property] : values.freeze
       end
 
       validate :validate_node
@@ -178,21 +181,23 @@ module Pglpg
         target.delete_node(ref)
       end
 
-      def key_property = schema_type.key&.property
+      def key_property = schema_type.key&.generated? ? schema_type.key.property : nil
 
       # The generated key is not required on insert.
       def required_now?(name) = new_record? ? name != key_property : super
 
-      # Keys are generated on insert and never change (ADR-0005, ADR-0010).
+      # Generated keys cannot be assigned; every stored key is immutable.
       def validate_node
         errors.add(:base, "#{schema_type.name} is abstract") if new_record? && schema_type.abstract?
-        key = key_property
-        return unless key && self.class.property_names.include?(key)
+        key = schema_type.key
+        return unless key
 
         if new_record?
-          errors.add(key, "is generated and cannot be assigned") unless attribute(key.to_s).nil?
+          if key.generated? && self.class.property_names.include?(key.property) && !attribute(key.property.to_s).nil?
+            errors.add(key.property, "is generated and cannot be assigned")
+          end
         else
-          schema_type.key.properties.each do |property|
+          key.properties.each do |property|
             errors.add(property, "cannot be changed") if attribute_changed?(property.to_s)
           end
         end

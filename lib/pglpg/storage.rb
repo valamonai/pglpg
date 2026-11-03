@@ -83,10 +83,11 @@ module Pglpg
       type.node_types.each_value do |t|
         has_label = "labels @> ARRAY[#{connection.quote(t.name.to_s)}]::text[]"
         if (key = t.own_key)
-          expressions = key.properties.map { "(properties->>#{connection.quote(_1.to_s)})" }.join(", ")
-          list << [:index, nodes_table, "key_#{t.name}_#{key.property}",
+          expressions = key.expressions(connection).join(", ")
+          list << [:index, nodes_table, "key_#{t.name}_#{key.property || key.properties.join("_")}",
                    "ON #{n} (#{expressions}) WHERE #{has_label}"]
         end
+        key_component_checks(list, connection, nodes_table, t, t.own_key, has_label) if t.own_key
         t.own_properties.each_value.select(&:required?).each do |p|
           list << [:check, nodes_table, "req_#{t.name}_#{p.name}", "NOT (#{has_label}) OR #{typed_check(connection, p)}"]
         end
@@ -96,7 +97,15 @@ module Pglpg
       type.edge_types.each_value do |t|
         is_type = "type = #{connection.quote(t.name.to_s)}"
         list << [:check, edges_table, "validity_#{t.name}", temporal_check(connection, t)] if temporal_storage
-        list << [:index, edges_table, "pair_#{t.name}", "ON #{e} (source_id, target_id) WHERE #{is_type}"] if t.unique_pair?
+        if t.unique_tuple?
+          expressions = ["source_id", "target_id", *(t.pair_key&.expressions(connection) || [])].join(", ")
+          list << [:index, edges_table, "pair_#{t.name}", "ON #{e} (#{expressions}) WHERE #{is_type}"]
+        end
+        if t.key
+          list << [:index, edges_table, "key_#{t.name}_#{t.key.properties.join("_")}",
+                   "ON #{e} (#{t.key.expressions(connection).join(", ")}) WHERE #{is_type}"]
+        end
+        [t.key, t.pair_key].compact.each { key_component_checks(list, connection, edges_table, t, _1, is_type) }
         if t.symmetric?
           # Canonical orientation, so a pair is stored one way only (ADR-0008).
           list << [:check, edges_table, "sym_#{t.name}",
@@ -282,6 +291,20 @@ module Pglpg
 
     # Rejects a missing key, JSON null and the wrong JSON type: a CHECK passes
     # on NULL, so the comparison is wrapped in IS TRUE.
+    def key_component_checks(list, connection, table, type, key, predicate)
+      key.properties.each do |name|
+        prop = type.properties.fetch(name)
+        value = "properties->#{connection.quote(name.to_s)}"
+        detail = case prop.type
+                 when :integer then "CASE WHEN jsonb_typeof(#{value}) = 'number' THEN (#{value})::numeric = trunc((#{value})::numeric) ELSE false END"
+                 when :enum then "properties->>#{connection.quote(name.to_s)} IN (#{prop.values.map { connection.quote(_1) }.join(", ")})"
+                 end
+        next unless detail
+
+        list << [:check, table, "keyval_#{type.name}_#{name}", "NOT (#{predicate}) OR (#{detail}) IS TRUE"]
+      end
+    end
+
     def typed_check(connection, prop)
       "(jsonb_typeof(properties->#{connection.quote(prop.name.to_s)}) = #{connection.quote(prop.json_type)}) IS TRUE"
     end

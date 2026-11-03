@@ -45,11 +45,23 @@ module Pglpg
     def find_node(type, **key)
       key = key.transform_keys(&:to_sym)
       node_type = graph.type.node_type!(type)
-      unless node_type.key && key.keys.sort == node_type.key.properties.sort
-        raise ArgumentError, "#{type} is looked up by #{node_type.key&.properties.inspect}"
-      end
+      raise ArgumentError, "#{type} has no key" unless node_type.key
 
+      node_type.key.validate_values!(node_type, key)
       match.node(:n, type, **key).first&.fetch(:n)
+    end
+
+    # Lookup by an exact edge property key. Compiler guards apply to the
+    # edge, both endpoints and the context's selected date.
+    def find_edge(type, **key)
+      edge_type = graph.type.edge_type!(type)
+      raise ArgumentError, "#{type} has no property key" unless edge_type.key
+
+      key = key.transform_keys(&:to_sym)
+      edge_type.key.validate_values!(edge_type, key)
+      query = match.node(:s)
+      query = query.public_send(edge_type.symmetric? ? :both : :out, type, :t, edge: :e)
+      query.where(e: key).return(:e).first&.fetch(:e)
     end
 
     # Visible nodes reachable from +from+ within +max_depth+ hops over the

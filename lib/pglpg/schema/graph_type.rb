@@ -59,7 +59,7 @@ module Pglpg
         type = EdgeType.new(name, from:, to:, unique:, symmetric:, allow_self_loops:, temporal:)
         raise SchemaError, "type #{type.name} is declared twice" if declared?(type.name)
 
-        ElementBuilder.new(type).instance_eval(&block) if block
+        EdgeBuilder.new(type).instance_eval(&block) if block
         @graph_type.edge_types[type.name] = type
       end
 
@@ -95,12 +95,16 @@ module Pglpg
       end
     end
 
+    class EdgeBuilder < ElementBuilder
+      def key(*names, generate: nil) = @type.key_property(*names, generate:)
+    end
+
     class NodeBuilder < ElementBuilder
       # Declares an exclusive key. Interactive inserts get a value from
       # +generate+ (default: a random UUID). Scoped keys may be caller-chosen
       # with an explicit key_scope_allowed grant.
-      def key(name, generate: nil, scope: nil)
-        @type.key_property(name, generate:, scope:)
+      def key(*names, generate: nil, scope: nil)
+        @type.key_property(*names, generate:, scope:)
       end
     end
   end

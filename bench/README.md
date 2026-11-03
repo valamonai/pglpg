@@ -161,9 +161,11 @@ driver refuses to run if any pglpg file is loaded from elsewhere.
   - **10m** doesn't run on pull requests. Scheduled runs gate it on absolute
     bounds only. A manual run with `compare_10m` compares it too, with
     `--require-baseline` on every compared fixture (1m, hub-heavy and 10m).
-    That comparison is required once to finish task
-    36367, and again for the release candidate before 0.2 (release gate
-    36368).
+    Task 36367 records the original comparison. Enhanced release acceptance
+    (task 36368), including strict candidate 1m/hub-heavy/10m comparisons, is
+    deferred to pre-1.0 by the owner decision of 2026-10-30. It is not a 0.3.0
+    release gate; resume only on owner instruction. Ordinary PR comparisons
+    still run automatically. See [RELEASING.md](https://knowen.md/nodes/36332).
 
 Laptop numbers with a warm cache are not production numbers; expect a small
 managed instance to be several times slower.

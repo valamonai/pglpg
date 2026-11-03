@@ -8,21 +8,64 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.3 development (unreleased).** The latest tagged version is 0.2.0.
-The temporal API below is available on this development branch. The design and its decisions live in the
+Status: **0.3.0 release candidate; not yet published.** The latest published
+version is 0.2.0. This candidate includes temporal edges, composite/edge keys
+and explicit open properties. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
 ## Install
 
-After publication:
+After 0.3.0 publication:
 
 ```ruby
-gem "pglpg", "~> 0.2.0"
+gem "pglpg", "~> 0.3.0"
 ```
 
 Before 1.0, minor releases may break compatibility. Read the
-[0.2.0 upgrade notes](CHANGELOG.md) before upgrading from 0.1.
+[0.3.0 upgrade notes](CHANGELOG.md) and the migration steps below before
+upgrading from 0.2. Applications still on 0.1 must also apply the 0.2 notes.
+
+## Upgrade from 0.2
+
+- Choose `as_of: Date` for dated reads or `as_of: :any` for all dates.
+  Omitted mode permits node-only/timeless-only reads; generic edge Ref lookup
+  needs a mode whenever the graph declares a temporal edge type. Dated
+  contexts are read-only, including model saves and trusted-writer access.
+- Temporal inserts and every upsert require explicit `valid_from:` (nil means
+  unbounded). Update omissions preserve bounds; an upsert's omitted upper
+  bound is nil on insert and preserved on conflict.
+- Before enabling temporal traffic on existing tables, finish an explicit
+  `enable_temporal!` migration. Remove conflicting application declarations,
+  audit legacy timestamps and `valid_until` boundaries, and convert them in
+  application migrations without silent truncation. Keep reads/writes disabled
+  during a deploy-then-migrate window. Retained temporal columns make every
+  constraint sync take an edge-table `ACCESS EXCLUSIVE` lock until outer commit;
+  schedule short migration transactions.
+- Adopt new key/uniqueness declarations with an explicit same-connection
+  transaction: backfill required components, resolve duplicates, then call
+  `sync_constraints!`. Composite/non-string keys and endpoint-unique edges
+  require trusted creation. Unique properties are immutable; keyed edge upsert
+  cannot rewire endpoints. Legacy single-string generation/scoped grants and
+  lifetime pair uniqueness retain their rules. Complete-key lookups take
+  literal values; use `match` for condition/array filters.
+- `open: true` is optional and changes no DDL. It rejects duplicate aliases across all
+  submitted properties, reserves structural/validity names even on other
+  element kinds/timeless graphs, and inherits from any open parent. Audit data
+  before closing a type or promoting extras to declarations. Queries and model
+  attributes still require declared properties; low-level writes and model
+  reload manage extras.
+
+Existing timeless, closed schemas with unchanged keys need no migration solely
+for the version bump. Rerun your real-policy leak suite and label-drift checks
+when adopting this minor release.
+
+This candidate implements a documented standards subset: key components are
+string/integer/boolean/enum, open extras are scalars/flat homogeneous lists,
+and temporal validity is one date interval with current authorization. It does
+not add alternate/overlap keys, open labels, dynamic query/model attributes,
+chained model associations or a GQL parser. Production-like acceptance remains
+separate pre-1.0 work; ordinary checks do not establish managed-plan capacity.
 
 ## Define a graph
 
@@ -189,7 +232,7 @@ row access. Scope and key are immutable. Existing data needs a transactional
 backfill and constraint migration; see the
 [API contract](https://knowen.md/nodes/36329).
 
-## Composite and edge keys (0.3, unreleased)
+## Composite and edge keys (0.3.0 candidate)
 
 Keys can use a tuple of required string, integer, boolean or enum properties:
 
@@ -235,7 +278,7 @@ by `storage.sync_constraints!` on the same connection. No automatic migration
 runs when a declaration is loaded. Other property types, optional uniqueness
 and multiple alternate keys are outside this key API.
 
-## Open properties (0.3, unreleased)
+## Open properties (0.3.0 candidate)
 
 Types stay closed by default. Opt in to extra properties explicitly:
 
@@ -283,7 +326,7 @@ Audit/backfill before closing types or promoting extras to typed declarations.
 Shape validation is at the library write boundary; raw SQL does not gain an
 open/closed constraint. The existing required-property and key checks remain.
 
-## Temporal edges (0.3, unreleased)
+## Temporal edges (0.3.0 candidate)
 
 Opt in per edge type and use one date across the whole query:
 

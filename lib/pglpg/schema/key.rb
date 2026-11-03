@@ -57,9 +57,11 @@ module Pglpg
         freeze
       end
 
+      def json_component?(name) = %i[integer boolean].include?(@types.fetch(name))
+
       def expressions(connection)
         properties.map do |name|
-          operator = %i[integer boolean].include?(@types.fetch(name)) ? "->" : "->>"
+          operator = json_component?(name) ? "->" : "->>"
           "(properties#{operator}#{connection.quote(name.to_s)})"
         end
       end

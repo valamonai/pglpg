@@ -201,6 +201,21 @@ RSpec.describe "general keys (ADR-0014)" do
     expect { graph.storage.sync_constraints! }.not_to raise_error
   end
 
+  it "can use the full unique index for composite, numeric and edge key lookups" do
+    a
+    edge = writer.insert_edge(:CITES, from: a, to: b, properties: { catalog: "source", number: 1 }, attrs:)
+    writer.insert_node(:Count, properties: { number: 7 }, attrs:)
+    graph.connection.execute("SET LOCAL enable_seqscan = off")
+    node_plan = context.match.node(:n, :Document, **key).explain.join("\n")
+    expect(node_plan).to include("key_Record_catalog_number", "Index Cond:")
+    expect(node_plan.lines.grep(/Index Cond/).join).to include("catalog", "number", "active")
+    numeric_plan = context.match.node(:n, :Count, number: 7).explain.join("\n")
+    expect(numeric_plan).to include("key_Count_number", "Index Cond:")
+    edge_plan = context.match.node(:s).out(:CITES, :t, edge: :e).where(e: { catalog: "source", number: 1 }).explain.join("\n")
+    expect(edge_plan).to include("key_CITES_catalog_number", "Index Cond:")
+    expect(context.find_edge(:CITES, catalog: "source", number: 1).ref).to eq(edge)
+  end
+
   it "rejects invalid tuple declarations and unsupported equality types" do
     [[], [:x, :x], [:missing]].each do |names|
       expect do

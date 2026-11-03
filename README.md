@@ -259,13 +259,23 @@ Extras accept strings, integers, finite floats, booleans and flat homogeneous
 scalar arrays (including empty arrays). Nil means absent/removal. Maps, nested
 or mixed arrays, nil array members, Symbols, dates/times, decimals and custom
 objects need explicit application conversion or a declared property type.
-Extra names cannot collide with row metadata, validity metadata or application
-columns. Duplicate String/Symbol aliases and invalid names are refused.
+Extra names cannot collide with structural row names, regardless of element
+kind (so even a node extra cannot be named `type`, `source_id` or `target_id`).
+Validity names `valid_from`/`valid_to` are reserved even in wholly timeless
+graphs. Application-column names of that element kind are also reserved.
+Invalid names are refused. On open types, duplicate String/Symbol aliases are
+rejected for every submitted property, including declared properties. Closed
+types retain their existing last-alias normalization.
 
 Queries, ordering, model attributes and `pluck` still require declarations.
 Models expose extras through their read-only `extra_properties`; saving declared
 attributes preserves them. Write extras through `Context`/`Writer` and reload
 the model to refresh its map. No dynamic query casts or model setters are added.
+
+Extras carry application data and gain no automatic tenant/ACL or visibility
+semantics. Existing row/write policies still apply, and write policies can
+inspect submitted extras. Keep security-relevant fields in explicit declarations
+or application columns, with an explicit authorization policy.
 
 Openness alone adds no DDL. Closing a type preserves existing extra data on
 reads and declared-only updates; it refuses resubmitted unknown properties.

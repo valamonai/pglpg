@@ -24,6 +24,7 @@ RSpec.describe "open properties (ADR-0015)" do
         key :uid
       end
       edge :CLOSED, from: :Agent, to: :Agent
+      edge :PAIR, from: :Agent, to: :Agent, unique: :pair, open: open
     end
   end
 
@@ -41,6 +42,9 @@ RSpec.describe "open properties (ADR-0015)" do
     expect(Kg.type.edge_type!(:KNOWS).open?).to be(false)
     expect { context.insert_node(:Closed, properties: { name: "x", extra: 1 }, attrs:) }.to raise_error(Pglpg::ValidationError, /no property/)
     expect { context.insert_edge(:CLOSED, from: a, to: b, properties: { extra: 1 }, attrs:) }.to raise_error(Pglpg::ValidationError)
+    closed = graph.type.node_type!(:Closed)
+    expect(closed.encode_properties({ "name" => "first", name: "last" })).to eq("name" => "last")
+    expect { graph.type.node_type!(:Person).encode_properties({ "name" => "first", name: "last" }) }.to raise_error(Pglpg::ValidationError, /duplicate/)
     [nil, 0, "true", :yes].each do |flag|
       expect { Pglpg::Graph.define(:bad) { node :N, open: flag } }.to raise_error(Pglpg::SchemaError, /open/)
       expect { Pglpg::Graph.define(:bad) { node :N; edge :E, from: :N, to: :N, open: flag } }.to raise_error(Pglpg::SchemaError, /open/)
@@ -86,6 +90,7 @@ RSpec.describe "open properties (ADR-0015)" do
   end
 
   it "rejects unsupported values without accidental JSON serialization or SQL" do
+    source, target = a, b
     custom = Object.new
     def custom.to_json(*) = raise("must not serialize this object")
     invalid = [custom, :symbol, BigDecimal("1.0"), Date.new(2020, 1, 1), Time.now, Float::NAN, Float::INFINITY,
@@ -94,9 +99,60 @@ RSpec.describe "open properties (ADR-0015)" do
       statements = []
       ActiveSupport::Notifications.subscribed(->(*args) { statements << args.last[:sql] }, "sql.active_record") do
         expect { context.insert_node(:Person, properties: { extra: value }, attrs:) }.to raise_error(Pglpg::ValidationError)
+        expect { context.insert_edge(:KNOWS, from: source, to: target, properties: { extra: value }, attrs:) }.to raise_error(Pglpg::ValidationError)
       end
       expect(statements).to be_empty
     end
+  end
+
+  it "deeply freezes historical map keys independently of JSON deserialization" do
+    outer_key, inner_key = +"outer", +"inner"
+    inner = {}.compare_by_identity
+    inner[inner_key] = ["value"]
+    legacy = {}.compare_by_identity
+    legacy[outer_key] = inner
+    expect(outer_key).not_to be_frozen
+    expect(inner_key).not_to be_frozen
+    decoded = graph.type.node_type!(:Person).decode_properties({ "payload" => legacy })
+    expect(decoded[:payload]).to be_frozen
+    expect(outer_key).to be_frozen
+    expect(inner_key).to be_frozen
+    expect(inner).to be_frozen
+    expect(inner[inner_key]).to be_frozen
+    expect(inner[inner_key].first).to be_frozen
+    json = graph.connection.quote({ payload: { outer: { inner: ["value"] } } }.to_json)
+    graph.connection.execute("UPDATE open_spec_nodes SET properties = properties || #{json}::jsonb WHERE id = #{a.id}")
+    from_sql = context.find(a)[:payload]
+    expect(from_sql.keys.first).to be_frozen
+    expect(from_sql["outer"].keys.first).to be_frozen
+    expect(from_sql["outer"]["inner"].first).to be_frozen
+  end
+
+  it "rejects invalid update extras before data statements while retaining visible-target preflights" do
+    context.update_node(a, properties: { note: "kept" })
+    edge = context.insert_edge(:KNOWS, from: a, to: b, properties: { note: "kept" }, attrs:)
+    writes = []
+    ActiveSupport::Notifications.subscribed(->(*args) { writes << args.last[:sql] if args.last[:sql].match?(/\A\s*(?:INSERT|UPDATE|DELETE)\b/i) }, "sql.active_record") do
+      [{ note: {} }, { classification: nil }, { "note" => "first", note: "last" }].each do |properties|
+        expect { context.update_node(a, properties:) }.to raise_error(Pglpg::ValidationError)
+        expect { context.update_edge(edge, properties:) }.to raise_error(Pglpg::ValidationError)
+      end
+    end
+    expect(writes).to be_empty
+    expect(context.find(a)[:note]).to eq("kept")
+    expect(context.find(edge)[:note]).to eq("kept")
+  end
+
+  it "merges and removes extras through non-key pair upserts" do
+    ref = writer.upsert_edge(:PAIR, from: a, to: b, properties: { note: "first", tags: [1, 2] }, attrs:)
+    expect(writer.upsert_edge(:PAIR, from: a, to: b, properties: { note: nil, flag: false }, attrs:)).to eq(ref)
+    expect(context.find(ref).properties).to eq(tags: [1, 2], flag: false)
+    writes = []
+    ActiveSupport::Notifications.subscribed(->(*args) { writes << args.last[:sql] if args.last[:sql].match?(/\A\s*(?:INSERT|UPDATE|DELETE)\b/i) }, "sql.active_record") do
+      expect { writer.upsert_edge(:PAIR, from: a, to: b, properties: { tags: [[1]] }, attrs:) }.to raise_error(Pglpg::ValidationError)
+    end
+    expect(writes).to be_empty
+    expect(context.find(ref).properties).to eq(tags: [1, 2], flag: false)
   end
 
   it "refuses invalid names, duplicate aliases, row metadata, app columns and validity names" do

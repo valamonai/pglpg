@@ -41,6 +41,8 @@ module Pglpg
 
       def required_properties = properties.values.select(&:required?)
 
+      # @api private
+      # Construction-only resolution; the descriptor is frozen afterwards.
       def resolve_open!(columns, parents: [])
         @open ||= parents.any?(&:open?)
         @extra_reserved_names = (Column::RESERVED + Temporal::NAMES + columns.keys).uniq.freeze
@@ -48,6 +50,7 @@ module Pglpg
 
       # Normalize before the writer generates/merges keys, so ambiguous
       # String/Symbol aliases cannot disappear before validation.
+      # @api private
       def normalize_properties(props)
         return (props || {}).transform_keys(&:to_sym) unless open?
 
@@ -126,7 +129,7 @@ module Pglpg
       def freeze_extra(value)
         case value
         when Array then value.each { freeze_extra(_1) }
-        when Hash then value.each_value { freeze_extra(_1) }
+        when Hash then value.each { |key, child| freeze_extra(key); freeze_extra(child) }
         end
         value.freeze
       end

@@ -27,7 +27,9 @@
 - Extra properties accept strict JSON-native scalars and flat homogeneous
   scalar arrays; nil means absent/removal. Invalid names, duplicate aliases,
   metadata/application-column collisions and unsupported values are refused
-  before the data statement. Extra decoded JSON values are deeply frozen.
+  before the data statement. Open-type alias rejection includes declared
+  fields; closed normalization is unchanged. Extra decoded JSON values,
+  including historical map keys, are deeply frozen.
 - Model `extra_properties` remains read-only and declared saves preserve
   extras. Query/filter/order/pluck still require declared properties. Openness
   adds no DDL; closing/promoting types requires explicit application auditing

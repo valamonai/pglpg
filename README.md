@@ -8,22 +8,20 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.4.0 release candidate**, with a read-only text MATCH parser.
-The latest published version is 0.3.0. The design and its decisions live in the
+Status: **0.4.0**, published on November 4, 2026, with a read-only text MATCH
+parser. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
 ## Install
 
 ```ruby
-gem "pglpg", "~> 0.3.0"
+gem "pglpg", "~> 0.4.0"
 ```
 
 Before 1.0, minor releases may break compatibility. Read the
 [0.3.0 upgrade notes](CHANGELOG.md) and the migration steps below before
 upgrading from 0.2. Applications still on 0.1 must also apply the 0.2 notes.
-
-After 0.4.0 is published, use `gem "pglpg", "~> 0.4.0"`.
 
 ## Upgrade from 0.3
 

@@ -8,9 +8,8 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.3.0**, published on November 3, 2026. This release includes
-temporal edges, composite/edge keys
-and explicit open properties. The design and its decisions live in the
+Status: **0.4.0 release candidate**, with a read-only text MATCH parser.
+The latest published version is 0.3.0. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
@@ -23,6 +22,26 @@ gem "pglpg", "~> 0.3.0"
 Before 1.0, minor releases may break compatibility. Read the
 [0.3.0 upgrade notes](CHANGELOG.md) and the migration steps below before
 upgrading from 0.2. Applications still on 0.1 must also apply the 0.2 notes.
+
+After 0.4.0 is published, use `gem "pglpg", "~> 0.4.0"`.
+
+## Upgrade from 0.3
+
+The parser is additive and requires no schema migration. Existing Ruby queries
+keep their behavior. Use text MATCH with named value parameters on an existing
+context:
+
+```ruby
+query = context.parse_match(
+  "MATCH (p:Person) WHERE p.name = $name RETURN p LIMIT 20",
+  params: { name: "Ann" }
+)
+query.to_a
+```
+
+Text supports fixed-length patterns and a subset of read clauses. It uses the
+context's visibility policy, date mode, and execution limits. See the
+[API contract](https://knowen.md/nodes/36329) for the grammar and error codes.
 
 ## Upgrade from 0.2
 

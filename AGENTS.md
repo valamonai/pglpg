@@ -6,9 +6,11 @@ This project uses **knowen.md** (knowen.md) as its knowledge base and issue trac
 Read [pglpg.md](https://knowen.md/nodes/36325) before any work.
 Use the knowen.md MCP server to work with knowen.md.
 
-## Documentation
+## Project graph
 
-All project knowledge lives in the [pglpg.md](https://knowen.md/nodes/36325) subgraph:
+- [Knowledge](https://knowen.md/nodes/36580) indexes documentation, decisions, and design proposals.
+- [Tasks](https://knowen.md/nodes/36581) explains how to create and track typed task nodes using their native state.
+- [TRAJECTORIES.md](https://knowen.md/nodes/36480) indexes project workflows. Use [Default](https://knowen.md/nodes/36334) unless the user names another trajectory.
 
 | Document | Answers |
 | -------- | ------- |
@@ -19,11 +21,15 @@ All project knowledge lives in the [pglpg.md](https://knowen.md/nodes/36325) sub
 | [ARCHITECTURE.md](https://knowen.md/nodes/36330) | How is it built internally? |
 | [DEVELOPMENT.md](https://knowen.md/nodes/36331) | How to set up, run and test the codebase? |
 | [RELEASING.md](https://knowen.md/nodes/36332) | How is it versioned and released? |
-| [KANBAN.md](https://knowen.md/nodes/36333) | Kanban board for tracking project tasks |
-| [AGENT-WORKFLOW.md](https://knowen.md/nodes/36334) | How should AI agents work with this project? |
 | [ADRS.md](https://knowen.md/nodes/36335) | Why were key decisions made? |
 
-Keep this file short. Durable knowledge belongs in the subgraph above, not here: when something here grows beyond a few lines, move it to the matching node and link to it.
+Keep this file short. Store durable knowledge in the relevant Knowledge node and link to it from here.
+
+## Starting a task
+
+1. Read [Tasks](https://knowen.md/nodes/36581). Resolve the task by title, node ID, or URL and read its acceptance criteria. Create top-level work as a typed task under Tasks.
+2. Read the selected trajectory and the project documentation it calls for. Clarify ambiguous task or trajectory references before changing task state.
+3. Follow the trajectory through handoff. Create follow-ups as backlog tasks directly under the current task. Give multiple follow-ups the same parent so they appear as siblings.
 
 ## Commands
 
@@ -38,7 +44,7 @@ Releases follow [RELEASING.md](https://knowen.md/nodes/36332).
 
 ## Rules for library code
 
-- **The public API is a contract.** Anything not documented in [API.md](https://knowen.md/nodes/36329) is internal. Changing the public API needs an ADR, or a Kanban task that says so, plus a changelog entry.
+- **The public API is a contract.** Anything not documented in [API.md](https://knowen.md/nodes/36329) is internal. Changing the public API needs an ADR or a task that records the change, plus a changelog entry.
 - **Follow the standards.** Model changes must match [STANDARDS.md](https://knowen.md/nodes/36336). Record every deliberate deviation there.
 - **Every query applies the visibility policy to every node and edge, on every hop.** Never add a code path that skips it.
 - **No raw SQL fragments from callers.** Conditions are structured, all values are bound as parameters, and path lengths always have an upper bound.
@@ -50,7 +56,7 @@ If a knowen.md write returns `403 master_protected`, `agent_published_tree` or `
 
 A response with `meta.reason: "grant_level"` means the refusal comes from your grant's level, not from the tree's protection. Every grant is `read` (View only), `propose` (Propose changes, the default) or `write` (Write directly), and only a `write` grant can write master (ADR-008 §7.5). Don't ask for a higher level; propose the change instead.
 
-Follow "Protected Trees: Propose, Don't Write (ADR-008)" in [AGENT-WORKFLOW.md](https://knowen.md/nodes/31743) of knowen.md.
+Follow "Protected Trees: Propose, Don't Write (ADR-008)" in [Knowen’s Default trajectory](https://knowen.md/nodes/31743).
 
 ## Syncing git PRs and graph PRs (ADR-010)
 
@@ -96,8 +102,8 @@ Skip it for small edits on the branch you already have checked out.
 
 Work is not complete until your branch is pushed and its pull requests are open:
 
-1. Track any remaining work as tasks under the [KANBAN.md](https://knowen.md/nodes/36333) Backlog column.
+1. Record remaining work as backlog tasks using the [Tasks instructions](https://knowen.md/nodes/36581).
 2. Run the checks listed in [DEVELOPMENT.md](https://knowen.md/nodes/36331).
 3. Push your branch (`git push -u origin HEAD`). Never commit to or push `master`.
-4. Open the git PR against `master` (`gh pr create`) with what changed, why, how it was tested, and a link to the Kanban task. If you changed documentation through a graph branch, seal its round, open the graph PR, and link the two PRs. Move the Kanban card to Review.
+4. Set the task’s native state to Review on the graph branch and seal the round. Open the git PR for repository changes and the graph PR for Knowen changes. Describe what changed, why, how it was checked, and link the task. Link the two PRs when both apply.
 5. Never merge your own pull request, git or graph: a human reviews and merges.

@@ -16,6 +16,8 @@ module Pglpg
     # Starts a fixed-length pattern query.
     def match = Query.new(self)
 
+    def parse_match(text, params: {}) = MatchParser.new(self, text, params).parse
+
     # The visible node or edge behind +ref+, or nil. A hidden element and a
     # missing one look the same.
     def find(ref)

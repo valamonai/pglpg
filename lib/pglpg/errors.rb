@@ -4,6 +4,21 @@ module Pglpg
   # Base class for every error pglpg raises.
   class Error < StandardError; end
 
+  # Text MATCH errors report byte positions in the submitted query.
+  class ParseError < Error
+    attr_reader :code, :position, :line, :column, :token
+
+    def initialize(message, code:, text:, position:, token:)
+      @code = code
+      @position = position
+      prefix = text.byteslice(0, position).b
+      @line = prefix.count("\n") + 1
+      @column = position - (prefix.rindex("\n") || -1)
+      @token = token&.freeze
+      super("#{message} at line #{line}, column #{column}")
+    end
+  end
+
   # The graph type declaration is invalid.
   class SchemaError < Error; end
 

@@ -25,6 +25,7 @@ module Pglpg
         persons: -> { m.().node(:p, :Person).order(p: :name) },
         works_on: -> { m.().node(:p, :Person).out(:WORKS_ON, :j, :Project, edge: :w) },
         two_hops: -> { m.().node(:p, :Person).out(:WORKS_ON, :j, :Project).out(:BASED_AT, :l, :Location) },
+        parsed_knows_chain: -> { ctx.parse_match("MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) RETURN a, b, c") },
         knows_chain: -> { m.().node(:a, :Person).out(:KNOWS, :b, :Person).out(:KNOWS, :c, :Person) },
         inbound: -> { m.().node(:l, :Location).in(:BASED_AT, :j, :Project).in(:WORKS_ON, :p, :Person) },
         branch: -> { m.().node(:j, :Project).in(:WORKS_ON, :p, :Person).out(:BASED_AT, :l, :Location, from: :j) },

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+### Added
+
+- `Context#parse_match(text, params: {})` builds a lazy query from a read-only
+  fixed-length GQL MATCH subset. It uses the Ruby query builder, named value
+  binds, and the caller’s visibility, date mode and execution limits. Invalid
+  text and arguments report bounded, located `Pglpg::ParseError` diagnostics.
+
 ## 0.3.0 (2026-11-03)
 
 ### Breaking

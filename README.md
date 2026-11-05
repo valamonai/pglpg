@@ -8,20 +8,27 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.4.0**, published on November 4, 2026, with a read-only text MATCH
-parser. The design and its decisions live in the
+Status: **0.5.0** release candidate, with bounded neighborhoods that return
+nodes and edges from one snapshot with exact truncation flags. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.
 
 ## Install
 
 ```ruby
-gem "pglpg", "~> 0.4.0"
+gem "pglpg", "~> 0.5.0"
 ```
 
 Before 1.0, minor releases may break compatibility. Read the
 [0.3.0 upgrade notes](CHANGELOG.md) and the migration steps below before
 upgrading from 0.2. Applications still on 0.1 must also apply the 0.2 notes.
+
+## Upgrade from 0.4
+
+Bounded neighborhoods are additive and require no schema migration. Existing
+reachability and MATCH queries keep their behavior. Applications using the shared
+visibility suite should rerun it: it now also observes neighborhood nodes, edges,
+ordering and both truncation flags.
 
 ## Upgrade from 0.3
 
@@ -228,7 +235,7 @@ isolation level. `deadline` is in seconds and can only shorten the configured
 `statement_timeout`; with no timeout configured it applies alone. Running out
 of time raises `Pglpg::QueryTimeout` and leaves your transaction usable.
 
-## Bounded neighborhoods (0.5, unreleased)
+## Bounded neighborhoods (0.5)
 
 ```ruby
 r = g.neighborhood(from: ann, via: %i[KNOWS FRIEND], direction: :both,

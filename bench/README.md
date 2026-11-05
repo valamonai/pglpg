@@ -266,3 +266,29 @@ reviewed commit makes the evidence durable without an external storage
 lifecycle. Use the adjacent JSON summary and the table above for review;
 extract the archive for per-cell plans. The archive is excluded from the gem.
 Its size is an intentional repository-history cost, not a runtime dependency.
+
+## Neighborhood comparison
+
+Run `bundle exec ruby bench/neighborhood.rb tmp/bench/neighborhood` with
+`PGLPG_BENCH_DATABASE_URL` pointing to a dedicated disposable PostgreSQL 18
+database. The script creates and drops only its neighborhood fixture tables.
+It compares the typed neighborhood with an adapter built from public
+`reachable`, `find` and fixed-pattern queries on the same loaded graph.
+
+The three fixtures cover the investigation pilot (100 visible and 100
+classified incidents, 20 shared locations), fan-out (500 visible and 500
+classified incidents with a tight node cap), and a dense selected set (every
+visible incident connects to all 20 locations with a tight edge cap).
+Tables are analyzed before comparing results. The script asserts typed data,
+depth, edge and truncation parity before measuring. Five warmups precede
+30 warm-cache samples per method. Plans are collected separately from timing.
+The JSON output records p50/p95 latency, graph data statement counts and
+shared buffers, plus runtime versions, fixture parameters and workload.
+
+The reference hydrates typed nodes as the candidate does, so it includes a
+seed lookup beyond the original pilot's edge-only probe. Per-source matches
+run without an explicit row limit and fail on overflow, ensuring that the
+small reference fixtures are fully observed. The reference uses sequential
+snapshots on immutable synthetic data. The neighborhood's concurrent-write
+spec separately verifies the single-snapshot guarantee. These measurements
+support SQL review and supply no new CI latency threshold.

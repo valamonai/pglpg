@@ -43,6 +43,16 @@ module Pglpg
 
     def compile
       sql = Sql.new(@graph.connection)
+      append_bfs(sql)
+      sql << " SELECT b.depth, u.id FROM bfs AS b CROSS JOIN LATERAL unnest(b.frontier) WITH ORDINALITY AS u(id, ord)"
+      sql << " WHERE b.depth > 0 ORDER BY b.depth, u.ord"
+    end
+
+    private
+
+    def neighbor_budget = @max_nodes
+
+    def append_bfs(sql)
       nodes = @context.table_sql(@graph.nodes_table)
       sql << "WITH RECURSIVE bfs(depth, frontier, visited) AS ("
       sql << "SELECT 0, ARRAY[s.id], ARRAY[s.id] FROM " << nodes << " AS s WHERE s.id = "
@@ -55,17 +65,13 @@ module Pglpg
       @context.append_node_visible(sql, "n")
       sql << " WHERE n.id <> ALL(b.visited) ORDER BY n.id LIMIT "
       # remaining + 1, where remaining = max_nodes - (cardinality(visited) - 1)
-      sql.bind(@max_nodes, "int") << " - cardinality(b.visited) + 2) AS ids"
+      sql.bind(neighbor_budget, "int") << " - cardinality(b.visited) + 2) AS ids"
       # Without OFFSET 0 the subquery is inlined into both references to
       # nxt.ids and each level is computed twice.
       sql << " OFFSET 0) AS nxt WHERE b.depth < "
       sql.bind(@max_depth, "int") << " AND cardinality(b.frontier) > 0 AND cardinality(b.visited) - 1 <= "
-      sql.bind(@max_nodes, "int") << ")"
-      sql << " SELECT b.depth, u.id FROM bfs AS b CROSS JOIN LATERAL unnest(b.frontier) WITH ORDINALITY AS u(id, ord)"
-      sql << " WHERE b.depth > 0 ORDER BY b.depth, u.ord"
+      sql.bind(neighbor_budget, "int") << ")"
     end
-
-    private
 
     def max_rows = Pglpg.configuration.max_rows
 
@@ -83,12 +89,12 @@ module Pglpg
       end
     end
 
-    def append_step(sql, e, near, far)
+    def append_step(sql, e, near, far, types = @types)
       sql << "SELECT " << e << "." << far << " AS far FROM " << @context.table_sql(@graph.edges_table) << " AS " << e
       sql << " WHERE " << e << "." << near << " = ANY(b.frontier) AND " << e << ".type = ANY("
-      sql.bind_text_array(@types) << ") AND "
+      sql.bind_text_array(types) << ") AND "
       @context.append_edge_visible(sql, e)
-      @context.append_temporal(sql, e, @types.map { @graph.type.edge_type!(_1) })
+      @context.append_temporal(sql, e, types.map { @graph.type.edge_type!(_1) })
     end
 
     def edge_types!(via, direction)

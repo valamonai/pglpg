@@ -76,6 +76,11 @@ module Pglpg
       Reachable.new(self, from:, via:, direction:, max_depth:, max_nodes:, deadline:).call
     end
 
+    # A bounded visible induced subgraph, including the seed, in one snapshot.
+    def neighborhood(from:, via:, max_depth:, max_nodes:, max_edges:, direction: :out, deadline: nil)
+      NeighborhoodQuery.new(self, from:, via:, max_depth:, max_nodes:, max_edges:, direction:, deadline:).call
+    end
+
     def insert_node(type, properties: {}, attrs: {}) = writer.insert_node(type, properties:, attrs:)
 
     def update_node(ref, properties: {}, attrs: {}) = writer.update_node(ref, properties:, attrs:)

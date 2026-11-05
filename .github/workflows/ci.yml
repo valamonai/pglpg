@@ -43,6 +43,8 @@ jobs:
         run: bundle exec ruby bench/gate.rb --candidate tmp/bench/ci | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Temporal benchmark smoke (ci fixture)
         run: bundle exec ruby bench/temporal.rb --fixture ci --load --out tmp/bench/temporal-ci
+      - name: Neighborhood pilot and cap comparison
+        run: bundle exec ruby bench/neighborhood.rb tmp/bench/neighborhood
       - uses: actions/upload-artifact@v4
         if: always()
         with:

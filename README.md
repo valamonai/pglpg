@@ -8,7 +8,7 @@ ordinary tables, written inside your own transactions. Every query applies
 your visibility policy to every node and edge on every hop, so hidden records
 never act as bridges and never show up in counts or limits.
 
-Status: **0.5.0** release candidate, with bounded neighborhoods that return
+Status: **0.5.0**, published on November 5, 2026, with bounded neighborhoods that return
 nodes and edges from one snapshot with exact truncation flags. The design and its decisions live in the
 [pglpg.md](https://knowen.md/nodes/36325) knowledge base. Requires Ruby ≥ 4.0,
 ActiveRecord ≥ 8.1 and PostgreSQL ≥ 18: the versions CI tests.

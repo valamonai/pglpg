@@ -67,6 +67,14 @@ module Pglpg
           [r.nodes.map { |node, depth| [node.id, depth] }, r.complete, r.stopped_at_depth]
         end
       end
+      out[:neighborhoods] = refs.select(&:node?).map do |ref|
+        [0, 1, budget].uniq.map do |edge_budget|
+          r = ctx.neighborhood(from: ref, via: %i[WORKS_ON BASED_AT KNOWS FRIEND], direction: :both,
+                               max_depth: 3, max_nodes: budget, max_edges: edge_budget)
+          [r.nodes.map { |node, depth| [element_data(node), depth] },
+           r.edges.map { element_data(_1) }, r.nodes_truncated?, r.edges_truncated?]
+        end
+      end
       out[:last_by_name] = element_data(m.().node(:p, :Person).order(p: { name: :desc }).first&.fetch(:p))
       out[:find] = refs.map { element_data(ctx.find(_1)) }
       out[:find_node] = %w[P1 P2 P3 H1].map { element_data(ctx.find_node(:Person, namespace: _1 == "H1" ? "hidden" : "visible", uid: _1)) }

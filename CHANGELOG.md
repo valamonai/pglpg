@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+### Added
+
+- `Context#neighborhood` returns typed visible nodes with minimum depths and
+  the eligible edges between them in one PostgreSQL statement and snapshot.
+  The seed counts toward the node budget. Independent node and edge overflow
+  probes give exact truncation flags, including at a zero edge budget. Mixed
+  directed and symmetric types use the neighborhood direction rules.
+
 ## 0.4.0 (2026-11-04)
 
 ### Added

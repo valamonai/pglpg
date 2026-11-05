@@ -228,6 +228,37 @@ isolation level. `deadline` is in seconds and can only shorten the configured
 `statement_timeout`; with no timeout configured it applies alone. Running out
 of time raises `Pglpg::QueryTimeout` and leaves your transaction usable.
 
+## Bounded neighborhoods (0.5, unreleased)
+
+```ruby
+r = g.neighborhood(from: ann, via: %i[KNOWS FRIEND], direction: :both,
+                   max_depth: 2, max_nodes: 50, max_edges: 100, deadline: 2.0)
+r.nodes.map { |node, depth| [node.ref, depth] }
+r.edges.map { |edge| [edge.ref, edge.source, edge.target] }
+r.nodes_truncated?
+r.edges_truncated?
+```
+
+The result contains typed `Pglpg::Node` values with their minimum depths and
+typed `Pglpg::Edge` values, from one statement and snapshot. The seed appears
+at depth zero and counts toward `max_nodes`. Nodes are ordered by depth then
+ID, and edges by ID. Visibility and the context's date rules apply before
+selection and overflow probes.
+
+`via` filters both traversal and the edges returned between selected nodes.
+Directed types follow `:out`, `:in`, or either direction with `:both`;
+symmetric types follow both directions with any option. Mixed lists are
+allowed. Traversal direction selects nodes. The result includes eligible
+stored edges between those nodes regardless of direction, preserving their
+stored source and target.
+
+The two flags report exact overflow independently. `edges_truncated?` is
+true only when another eligible edge exists between returned nodes; edges
+touching an omitted node cannot affect it. An exactly full cap gives false.
+`max_nodes` is 1 through `max_rows`, `max_edges` is 0 through `max_rows`,
+and `max_depth` is at least 1. A zero edge cap still probes for an eligible
+edge. See the [API contract](https://knowen.md/nodes/36329) for the full rules.
+
 ## Models and eager loading
 
 `require "pglpg/model"` adds optional ActiveModel records bound to a graph and

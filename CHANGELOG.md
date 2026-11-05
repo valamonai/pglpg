@@ -10,6 +10,10 @@
   probes give exact truncation flags, including at a zero edge budget. Mixed
   directed and symmetric types use the neighborhood direction rules.
 
+- The shared visibility suite in `Pglpg::Testing` now observes neighborhood
+  nodes, edges, order and both truncation flags when comparing results before
+  and after hidden data is added.
+
 ## 0.4.0 (2026-11-04)
 
 ### Added
